@@ -1,0 +1,7 @@
+# Data folder
+data/
+markdown/
+
+# Python built-in cache
+__pycache__/
+*.pyc
