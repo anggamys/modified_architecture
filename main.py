@@ -1,21 +1,24 @@
 import pandas as pd
+import torch
 from preprocess import (
     build_char_vocab,
     check_vocab_coverage,
     class_distribution,
     split_train_val_test,
 )
-from utils import dataInfo, log, log_level
+
+from utils import dataInfo, log, log_level, argParser
+from feature_extraction import CharCNN, Bert
 
 
-def main():
-    sample_data = pd.read_csv("./data/sample-anotasi-merge-valid.csv")
+def main(data_path: str):
+    sample_data = pd.read_csv(data_path)
     dataInfo(sample_data)
 
     class_distribution(sample_data, "pos_tag")
 
-    char_vocab = build_char_vocab(sample_data)
- 
+    char_vocab = build_char_vocab(sample_data, min_freq=5, include_emoji=False)
+
     check_vocab_coverage(sample_data, char_vocab)
 
     train_df, val_df, test_df = split_train_val_test(
@@ -27,5 +30,30 @@ def main():
         level=log_level.INFO,
     )
 
+    char_extraction = CharCNN(vocab_size=len(char_vocab))
+
+    log("Feature extraction model initialized.", level=log_level.INFO)
+
+    char_extraction.to("cuda" if torch.cuda.is_available() else "cpu")
+
+    bert_extraction = Bert()
+
+    log("BERT model initialized.", level=log_level.INFO)
+
+    bert_extraction.to("cuda" if torch.cuda.is_available() else "cpu")
+
+
 if __name__ == "__main__":
-    main()
+    args = argParser(
+        description="Run the main function with the specified data path.",
+        args=[
+            {
+                "flag": "--data_path",
+                "type": str,
+                "help": "Path to the input CSV data file.",
+                "required": False,
+            }
+        ],
+    ).parse_args()
+
+    main(data_path=args.data_path if args.data_path else "data/sample_data.csv")

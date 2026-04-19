@@ -1,6 +1,7 @@
 # Data folder
 data/
 markdown/
+article/
 
 # Python built-in cache
 __pycache__/

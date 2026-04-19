@@ -1,5 +1,5 @@
 import enum
-# import argparse
+import argparse
 
 from datetime import datetime as dt
 from zoneinfo import ZoneInfo as tz
@@ -11,8 +11,18 @@ def timestamp() -> str:
     return dt.now(tz("Asia/Jakarta")).strftime("%Y-%m-%d_%H-%M-%S")
 
 
-def argParser():
-    pass
+def argParser(description: str, args: list) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=description)
+
+    for arg in args:
+        parser.add_argument(
+            arg["flag"],
+            type=arg["type"],
+            help=arg["help"],
+            required=arg.get("required", False),
+        )
+
+    return parser
 
 
 def dataInfo(dataframe) -> None:
