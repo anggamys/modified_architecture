@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from torch import Tensor
-from transformers import AutoTokenizer, PreTrainedTokenizerBase, PreTrainedModel
+from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerBase, PreTrainedModel
 
 from utils import log, log_level, dowloadModel
 from preprocess import prepare_char_ids
@@ -59,12 +59,12 @@ def test_feature_extraction(
         level=log_level.INFO,
     )
 
-    model_load : PreTrainedModel = dowloadModel(model_name)
-    
-    tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(model_name)
+    model_path: str = dowloadModel(model_name)
+    tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(model_path)
 
-    # Bert sekarang menerima PreTrainedModel instance, bukan path string
-    bert_extraction: Bert = Bert(bert=model_load)
+    # dowloadModel mengembalikan path string — perlu dimuat dulu dengan AutoModel
+    bert_model: PreTrainedModel = AutoModel.from_pretrained(model_path)
+    bert_extraction: Bert = Bert(bert=bert_model)
     bert_extraction.to(device)
     bert_extraction.eval()
 
