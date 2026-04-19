@@ -5,8 +5,8 @@ from preprocess import (
     check_vocab_coverage,
     class_distribution,
     split_train_val_test,
-    calculate_class_weights,
-    create_torch_weight_tensor,
+    # calculate_class_weights,
+    # create_torch_weight_tensor,
 )
 
 from utils import dataInfo, log, log_level, argParser
@@ -21,7 +21,7 @@ def main(data_path: str, model_name: str) -> None:
     dataInfo(sample_data)
 
     class_distribution(sample_data, "pos_tag")
-    class_weights = calculate_class_weights(sample_data["pos_tag"])
+    # class_weights = calculate_class_weights(sample_data["pos_tag"])
 
     # Buat mapping class -> index untuk torch tensor
     unique_classes = sorted(sample_data["pos_tag"].unique())
@@ -64,17 +64,17 @@ def main(data_path: str, model_name: str) -> None:
         device=device,
     )
 
-    weight_tensor = create_torch_weight_tensor(class_weights, class_to_idx)
+    # weight_tensor = create_torch_weight_tensor(class_weights, class_to_idx)
 
-    log(
-        f"Weight tensor untuk nn.CrossEntropyLoss:\n{weight_tensor}",
-        level=log_level.INFO,
-    )
+    # log(
+    #     f"Weight tensor untuk nn.CrossEntropyLoss:\n{weight_tensor}",
+    #     level=log_level.INFO,
+    # )
 
-    log(
-        "Usage: loss_fn = nn.CrossEntropyLoss(weight=weight_tensor.to(device))",
-        level=log_level.INFO,
-    )
+    # log(
+    #     "Usage: loss_fn = nn.CrossEntropyLoss(weight=weight_tensor.to(device))",
+    #     level=log_level.INFO,
+    # )
 
 
 if __name__ == "__main__":

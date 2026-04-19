@@ -3,7 +3,7 @@ import torch
 from transformers import AutoTokenizer
 
 from preprocess import prepare_char_ids
-from feature_extraction import CharCNN, Bert
+from feature_extraction import CharCNN, Bert, HybridModel
 from utils import log, log_level, dowloadModel
 
 
@@ -100,9 +100,67 @@ def test_feature_extraction(
         level=log_level.INFO,
     )
 
+    num_classes = sample_data["pos_tag"].nunique()
+    hybrid_model = HybridModel(
+        char_vocab_size=len(char_vocab),
+        num_classes=num_classes,
+    ).to(device)
+    hybrid_model.eval()
+
+    log(f"Number of POS classes: {num_classes}", level=log_level.INFO)
+
+    # Prepare labels untuk testing (dummy)
+    # Labels shape: (B, S) - sesuai dengan attention_mask
+    labels = torch.zeros(
+        (encoding["input_ids"].shape[0], encoding["input_ids"].shape[1]),
+        dtype=torch.long,
+    ).to(device)
+
+    log(f"[HybridModel] Labels shape: {labels.shape}", level=log_level.INFO)
+
+    with torch.no_grad():
+        # Test forward pass dengan labels (untuk loss calculation)
+        loss = hybrid_model(
+            char_ids=char_ids_tensor,
+            input_ids=encoding["input_ids"],
+            attention_mask=encoding["attention_mask"],
+            labels=labels,
+        )
+
+    log(f"[HybridModel] Loss (with labels): {loss.item():.6f}", level=log_level.INFO)
+
+    # Test inference mode (tanpa labels)
+    with torch.no_grad():
+        preds = hybrid_model(
+            char_ids=char_ids_tensor,
+            input_ids=encoding["input_ids"],
+            attention_mask=encoding["attention_mask"],
+            labels=None,
+        )
+
+    log(f"[HybridModel] Predictions: {preds}", level=log_level.INFO)
     log(
-        f"Conclusion: CharCNN output dim: {char_output.shape[-1]}, BERT output dim: {bert_output.shape[-1]}",
+        f"[HybridModel] Number of predicted sequences: {len(preds)}",
         level=log_level.INFO,
     )
 
-    return char_extraction, bert_extraction
+    if len(preds) > 0:
+        log(
+            f"[HybridModel] First sequence length: {len(preds[0])}",
+            level=log_level.INFO,
+        )
+
+        log(
+            f"[HybridModel] First sequence predictions: {preds[0][:10]}",
+            level=log_level.INFO,
+        )
+
+    # ===== Summary =====
+    log("Testing Summary", level=log_level.INFO)
+    log(f"✓ CharCNN output shape: {char_output.shape}", level=log_level.INFO)
+    log(f"✓ BERT output shape: {bert_output.shape}", level=log_level.INFO)
+    log(f"✓ HybridModel loss: {loss.item():.6f}", level=log_level.INFO)
+    log(f"✓ HybridModel predictions: {len(preds)} sequences", level=log_level.INFO)
+    log("✓ All models tested successfully!", level=log_level.INFO)
+
+    return char_extraction, bert_extraction, hybrid_model
