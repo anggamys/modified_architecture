@@ -216,8 +216,23 @@ class HybridModel(nn.Module):
         attention_mask: Tensor,
         labels: Tensor | None = None,
     ):
-        bert_out = self.bert(input_ids, attention_mask)  # (B,S,768)
-        char_out = self.char_cnn(char_ids)  # (B,S,128)
+        bert_out = self.bert(input_ids, attention_mask)  # (B,S_bert,768)
+        char_out = self.char_cnn(char_ids)  # (B,S_char,128)
+
+        # Align sequence lengths between BERT and CharCNN outputs
+        S_bert = bert_out.shape[1]
+        S_char = char_out.shape[1]
+
+        if S_bert != S_char:
+            # Pad the shorter sequence or truncate the longer one
+            target_seq_len = min(S_bert, S_char)
+
+            if S_bert > target_seq_len:
+                bert_out = bert_out[:, :target_seq_len, :]
+                attention_mask = attention_mask[:, :target_seq_len]
+
+            if S_char > target_seq_len:
+                char_out = char_out[:, :target_seq_len, :]
 
         x = torch.cat([bert_out, char_out], dim=-1)  # (B,S,896)
         x = F.relu(self.fusion(x))  # (B,S,256)
@@ -228,9 +243,12 @@ class HybridModel(nn.Module):
         mask = attention_mask.bool()
 
         if labels is not None:
+            # Truncate labels to match aligned sequence length
+            if labels.shape[1] > emissions.shape[1]:
+                labels = labels[:, : emissions.shape[1]]
             loss = -self.crf(emissions, labels, mask=mask)
             return loss
 
         else:
-            preds = self.crf.decode(emissions, mask=mask)
+            preds = self.crf.viterbi_decode(emissions, mask=mask)
             return preds
