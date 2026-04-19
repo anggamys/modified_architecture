@@ -5,13 +5,15 @@ from preprocess import (
     check_vocab_coverage,
     class_distribution,
     split_train_val_test,
+    calculate_class_weights,
+    create_torch_weight_tensor,
 )
 
 from utils import dataInfo, log, log_level, argParser
 from testing import test_feature_extraction
 
 
-def main(data_path: str, model_name: str) -> None:
+def main(data_path: str, model_name: str) -> dict:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(f"Using device: {device}", level=log_level.INFO)
 
@@ -19,6 +21,14 @@ def main(data_path: str, model_name: str) -> None:
     dataInfo(sample_data)
 
     class_distribution(sample_data, "pos_tag")
+    class_weights = calculate_class_weights(sample_data["pos_tag"])
+
+    # Buat mapping class -> index untuk torch tensor
+    unique_classes = sorted(sample_data["pos_tag"].unique())
+    class_to_idx = {cls: idx for idx, cls in enumerate(unique_classes)}
+    idx_to_class = {idx: cls for cls, idx in class_to_idx.items()}
+
+    log(f"Class to index mapping: {class_to_idx}", level=log_level.INFO)
 
     char_vocab = build_char_vocab(sample_data, min_freq=5, include_emoji=False)
 
@@ -33,6 +43,18 @@ def main(data_path: str, model_name: str) -> None:
         level=log_level.INFO,
     )
 
+    # Verify label distribution balanced di semua split
+    log("Label distribution setelah split:", level=log_level.INFO)
+    for split_name, split_df in [
+        ("Train", train_df),
+        ("Val", val_df),
+        ("Test", test_df),
+    ]:
+        log(f"  {split_name}:", level=log_level.INFO)
+        dist = split_df["pos_tag"].value_counts(normalize=True)
+        for cls, pct in dist.items():
+            log(f"    {cls}: {pct:.4f}", level=log_level.INFO)
+
     # Test feature extraction
     test_feature_extraction(
         sample_data=train_df,
@@ -41,6 +63,30 @@ def main(data_path: str, model_name: str) -> None:
         batch_size=32,
         device=device,
     )
+
+    weight_tensor = create_torch_weight_tensor(class_weights, class_to_idx)
+
+    log(
+        f"Weight tensor untuk nn.CrossEntropyLoss:\n{weight_tensor}",
+        level=log_level.INFO,
+    )
+
+    log(
+        "Usage: loss_fn = nn.CrossEntropyLoss(weight=weight_tensor.to(device))",
+        level=log_level.INFO,
+    )
+
+    return {
+        "train_df": train_df,
+        "val_df": val_df,
+        "test_df": test_df,
+        "char_vocab": char_vocab,
+        "class_weights": class_weights,
+        "weight_tensor": weight_tensor,
+        "class_to_idx": class_to_idx,
+        "idx_to_class": idx_to_class,
+        "device": device,
+    }
 
 
 if __name__ == "__main__":
@@ -64,4 +110,7 @@ if __name__ == "__main__":
         ],
     ).parse_args()
 
-    main(data_path=args.data_path, model_name=args.model_name)
+    result = main(data_path=args.data_path, model_name=args.model_name)
+
+    log("Main execution completed successfully!", level=log_level.INFO)
+    log(f"Available outputs: {list(result.keys())}", level=log_level.INFO)

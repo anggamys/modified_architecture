@@ -2,8 +2,9 @@ import string
 import unicodedata
 import numpy as np
 import pandas as pd
+import torch
 
-from typing import Tuple
+from typing import Tuple, Dict
 from collections import Counter
 from sklearn.model_selection import GroupShuffleSplit
 
@@ -38,6 +39,17 @@ def split_train_val_test(
     test_ratio: float = 0.125,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Split data dengan stratifikasi by:
+    1. Document groups (GroupShuffleSplit)
+    2. Label distribution (pos_tag)
+    3. MLU buckets (token complexity)
+
+    Ini memastikan setiap split memiliki:
+    - Dokumen yang berbeda (no data leakage)
+    - Distribusi class yang balanced
+    - Representasi complexity yang sama
+    """
     total = train_ratio + val_ratio + test_ratio
     if abs(total - 1.0) > 1e-6:
         raise ValueError(
@@ -49,8 +61,19 @@ def split_train_val_test(
         lambda x: "_".join(x.split("_")[:-1])
     )
 
-    groups = df["_doc_id"]
+    # Tambahkan MLU bucket untuk stratifikasi complexity
+    df["_token_len"] = df["token"].astype(str).str.len()
+    mlu_per_doc = df.groupby("_doc_id")["_token_len"].mean()
+    df["_mlu_bucket"] = (
+        df["_doc_id"]
+        .map(mlu_per_doc)
+        .apply(lambda x: "short" if x < 5 else ("medium" if x < 8 else "long"))
+    )
 
+    # Stratifikasi kombinasi: label + MLU bucket
+    df["_strat_key"] = df["pos_tag"] + "_" + df["_mlu_bucket"]
+
+    groups = df["_doc_id"]
     n_docs = groups.nunique()
 
     log(
@@ -58,23 +81,46 @@ def split_train_val_test(
         level=log_level.INFO,
     )
 
-    gss_train = GroupShuffleSplit(n_splits=1, train_size=train_ratio, random_state=seed)
-    train_idx, temp_idx = next(gss_train.split(X=df, y=df["pos_tag"], groups=groups))
+    # Log stratification info
+    log(
+        f"MLU distribution: short={sum(df['_mlu_bucket'] == 'short')}, "
+        f"medium={sum(df['_mlu_bucket'] == 'medium')}, "
+        f"long={sum(df['_mlu_bucket'] == 'long')}",
+        level=log_level.INFO,
+    )
 
-    train_df = df.iloc[train_idx].drop(columns="_doc_id").reset_index(drop=True)
+    # First split: train vs temp (val + test)
+    gss_train = GroupShuffleSplit(n_splits=1, train_size=train_ratio, random_state=seed)
+    train_idx, temp_idx = next(gss_train.split(X=df, y=df["_strat_key"], groups=groups))
+
+    train_df = (
+        df.iloc[train_idx]
+        .drop(columns=["_doc_id", "_token_len", "_mlu_bucket", "_strat_key"])
+        .reset_index(drop=True)
+    )
     df_temp = df.iloc[temp_idx]
 
+    # Second split: val vs test dari temp
     val_size_relative = val_ratio / (val_ratio + test_ratio)
     gss_val = GroupShuffleSplit(
         n_splits=1, train_size=val_size_relative, random_state=seed
     )
     val_idx, test_idx = next(
-        gss_val.split(X=df_temp, y=df_temp["pos_tag"], groups=df_temp["_doc_id"])
+        gss_val.split(X=df_temp, y=df_temp["_strat_key"], groups=df_temp["_doc_id"])
     )
 
-    val_df = df_temp.iloc[val_idx].drop(columns="_doc_id").reset_index(drop=True)
-    test_df = df_temp.iloc[test_idx].drop(columns="_doc_id").reset_index(drop=True)
+    val_df = (
+        df_temp.iloc[val_idx]
+        .drop(columns=["_doc_id", "_token_len", "_mlu_bucket", "_strat_key"])
+        .reset_index(drop=True)
+    )
+    test_df = (
+        df_temp.iloc[test_idx]
+        .drop(columns=["_doc_id", "_token_len", "_mlu_bucket", "_strat_key"])
+        .reset_index(drop=True)
+    )
 
+    # Log hasil split
     train_docs = (
         train_df["global_sentence_id"]
         .apply(lambda x: "_".join(x.split("_")[:-1]))
@@ -191,6 +237,86 @@ def _log_char_distribution(char_freq: Counter, min_freq: int = 5) -> None:
 
     if rare_chars > 0:
         log(f"Karakter langka (< {min_freq}x): {rare_chars}", level=log_level.WARNING)
+
+
+def calculate_mlu(tokens: pd.Series) -> float:
+    """
+    Hitung Mean Length of Utterance (jumlah characters per token).
+    Berguna untuk stratifikasi complexity.
+    """
+    return tokens.astype(str).str.len().mean()
+
+
+def calculate_class_weights(labels: pd.Series, smooth: float = 1.0) -> Dict[str, float]:
+    """
+    Hitung class weights untuk handle imbalance.
+
+    Args:
+        labels: Series berisi class labels
+        smooth: smoothing factor untuk menghindari division by zero
+
+    Returns:
+        Dict mapping class -> weight (normalized)
+
+    Formula: weight = 1 / (frequency + smooth)
+    """
+    value_counts = labels.value_counts()
+
+    # Log distribution sebelum weight calculation
+    log("Original class distribution:", level=log_level.INFO)
+    for cls, count in value_counts.items():
+        pct = (count / len(labels)) * 100
+        log(f"  {cls}: {count:,} tokens ({pct:.4f}%)", level=log_level.INFO)
+
+    # Hitung weights menggunakan inverse frequency
+    weights = {}
+    total_samples = len(labels)
+
+    for class_label in labels.unique():
+        class_count = value_counts.get(class_label, 1)
+        # Inverse frequency: semakin jarang semakin besar weight-nya
+        weight = total_samples / (len(labels.unique()) * class_count)
+        weights[class_label] = weight
+
+    # Normalize ke range [0.5, 2.0] untuk stability
+    min_weight = min(weights.values())
+    max_weight = max(weights.values())
+
+    if max_weight > min_weight:
+        for cls in weights:
+            weights[cls] = (
+                0.5 + (weights[cls] - min_weight) / (max_weight - min_weight) * 1.5
+            )
+
+    log("Calculated class weights:", level=log_level.INFO)
+    for cls, weight in sorted(weights.items()):
+        log(f"  {cls}: {weight:.4f}", level=log_level.INFO)
+
+    return weights
+
+
+def create_torch_weight_tensor(
+    weights: Dict[str, float], class_to_idx: Dict[str, int]
+) -> torch.Tensor:
+    """
+    Convert class weights dict ke torch tensor untuk nn.CrossEntropyLoss.
+
+    Args:
+        weights: Dict dari class -> weight
+        class_to_idx: Mapping class label ke index
+
+    Returns:
+        torch.Tensor of shape (num_classes,)
+    """
+    num_classes = len(class_to_idx)
+    weight_tensor = torch.zeros(num_classes)
+
+    for class_label, weight in weights.items():
+        if class_label in class_to_idx:
+            idx = class_to_idx[class_label]
+            weight_tensor[idx] = weight
+
+    return weight_tensor
 
 
 def check_vocab_coverage(dataframe: pd.DataFrame, char_vocab: dict) -> None:
