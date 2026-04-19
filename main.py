@@ -1,6 +1,8 @@
-import pandas as pd
 import torch
-from transformers import AutoModel
+import pandas as pd
+
+from torch.utils.data import DataLoader
+from transformers import AutoModel, AutoTokenizer
 
 from preprocess import (
     build_char_vocab,
@@ -11,13 +13,13 @@ from preprocess import (
     create_torch_weight_tensor,
 )
 
-from utils import dataInfo, log, log_level, argParser, dowloadModel
-from testing import test_feature_extraction
-# from train import train_model
+from train import train_model, evaluate, compute_accuracy
 from feature_extraction import HybridModel
+from dataset import POSDataset, make_collate_fn
+from utils import dataInfo, log, log_level, argParser, dowloadModel
 
 
-def main(data_path: str, model_name: str) -> None:
+def main(data_path: str, model_name: str, epochs: int = 10) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(f"Using device: {device}", level=log_level.INFO)
 
@@ -58,11 +60,12 @@ def main(data_path: str, model_name: str) -> None:
         dist_str = " | ".join(f"{cls}: {pct:.4f}" for cls, pct in dist.items())
         log(f"{split_name}: {dist_str}", level=log_level.INFO)
 
-    # ── Class weights (dari train split, via preprocess.py) ──────────────
     # calculate_class_weights: inverse frequency, dinormalisasi ke [0.5, 2.0]
     # create_torch_weight_tensor: mapping class name → tensor index
     class_weights_dict = calculate_class_weights(train_df["pos_tag"])
-    class_weights = create_torch_weight_tensor(class_weights_dict, class_to_idx).to(device)
+    class_weights = create_torch_weight_tensor(class_weights_dict, class_to_idx).to(
+        device
+    )
 
     log(
         "Class weights (top 5 heaviest): "
@@ -73,7 +76,6 @@ def main(data_path: str, model_name: str) -> None:
         level=log_level.INFO,
     )
 
-    # ── Sanity check: feature extraction ──────────────────────────────────
     model_path: str = dowloadModel(model_name)
 
     # test_feature_extraction(
@@ -84,7 +86,6 @@ def main(data_path: str, model_name: str) -> None:
     #     device=device,
     # )
 
-    # ── Model ──────────────────────────────────────────────────────────────
     bert_model = AutoModel.from_pretrained(model_path)
 
     model = HybridModel(
@@ -101,18 +102,66 @@ def main(data_path: str, model_name: str) -> None:
         level=log_level.INFO,
     )
 
-    # ── DataLoaders ────────────────────────────────────────────────────────
-    # TODO: implementasi POSDataset & collate_fn untuk membungkus train_df / val_df
-    # ke dalam DataLoader. Setelah itu panggil train_model().
-    #
-    # Contoh:
-    #   train_loader = DataLoader(
-    #       POSDataset(train_df, char_vocab, class_to_idx, tokenizer),
-    #       batch_size=16, shuffle=True, collate_fn=pos_collate_fn
-    #   )
-    #   val_loader = DataLoader(...)
-    #
-    #   train_model(model, train_loader, val_loader, device, epochs=10)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+    collate_fn = make_collate_fn(pad_token_id=tokenizer.pad_token_id)
+
+    train_dataset = POSDataset(train_df, char_vocab, class_to_idx, tokenizer)
+    val_dataset = POSDataset(val_df, char_vocab, class_to_idx, tokenizer)
+    test_dataset = POSDataset(test_df, char_vocab, class_to_idx, tokenizer)
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=16,
+        shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=2,
+        pin_memory=(device == "cuda"),
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=16,
+        shuffle=False,
+        collate_fn=collate_fn,
+        num_workers=2,
+        pin_memory=(device == "cuda"),
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=16,
+        shuffle=False,
+        collate_fn=collate_fn,
+        num_workers=2,
+        pin_memory=(device == "cuda"),
+    )
+
+    log(
+        f"DataLoader → train: {len(train_loader)} batch | "
+        f"val: {len(val_loader)} batch | test: {len(test_loader)} batch",
+        level=log_level.INFO,
+    )
+
+    train_model(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        device=device,
+        epochs=epochs,
+        checkpoint_path="best_model.pt",
+    )
+
+    # ── Final evaluation pada test set (hanya sekali, setelah training selesai) ──
+    # Load checkpoint terbaik sebelum evaluasi agar tidak pakai model epoch terakhir
+    model.load_state_dict(torch.load("best_model.pt", map_location=device))
+    log("Loaded best checkpoint untuk final evaluation.", level=log_level.INFO)
+
+    test_loss, test_preds, test_labels = evaluate(model, test_loader, device)
+    test_acc = compute_accuracy(test_preds, test_labels)
+
+    log(f"[Test] Loss     : {test_loss:.4f}", level=log_level.INFO)
+    log(f"[Test] Accuracy : {test_acc:.4f} ({test_acc * 100:.2f}%)", level=log_level.INFO)
 
 
 if __name__ == "__main__":
@@ -133,7 +182,18 @@ if __name__ == "__main__":
                 "help": "Name of the Hugging Face model to download.",
                 "required": False,
             },
+            {
+                "flag": "--epochs",
+                "type": int,
+                "default": 10,
+                "help": "Number of training epochs.",
+                "required": False,
+            },
         ],
     ).parse_args()
 
-    main(data_path=args.data_path, model_name=args.model_name)
+    main(
+        data_path=args.data_path,
+        model_name=args.model_name,
+        epochs=args.epochs,
+    )
