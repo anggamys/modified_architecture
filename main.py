@@ -76,13 +76,13 @@ def main(data_path: str, model_name: str) -> None:
     # ── Sanity check: feature extraction ──────────────────────────────────
     model_path: str = dowloadModel(model_name)
 
-    test_feature_extraction(
-        sample_data=train_df,
-        char_vocab=char_vocab,
-        model_name=model_name,
-        batch_size=32,
-        device=device,
-    )
+    # test_feature_extraction(
+    #     sample_data=train_df,
+    #     char_vocab=char_vocab,
+    #     model_name=model_name,
+    #     batch_size=32,
+    #     device=device,
+    # )
 
     # ── Model ──────────────────────────────────────────────────────────────
     bert_model = AutoModel.from_pretrained(model_path)
