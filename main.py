@@ -1,3 +1,4 @@
+import json
 import torch
 import pandas as pd
 
@@ -162,6 +163,23 @@ def main(data_path: str, model_name: str, epochs: int = 10, patience: int = 3, b
     log(f"[Test] Accuracy : {test_acc:.4f} ({test_acc * 100:.2f}%)", level=log_level.INFO)
 
     compute_classification_report(test_preds, test_labels, idx_to_class)
+
+    # Simpan vocab & class mapping untuk dipakai oleh inference.py
+    with open("char_vocab.json", "w", encoding="utf-8") as f:
+        json.dump(char_vocab, f, ensure_ascii=False, indent=2)
+
+    with open("class_mappings.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "class_to_idx": class_to_idx,
+                "idx_to_class": {str(k): v for k, v in idx_to_class.items()},
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    log("Vocab & class mappings disimpan: char_vocab.json, class_mappings.json", level=log_level.INFO)
 
 
 if __name__ == "__main__":

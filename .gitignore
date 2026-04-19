@@ -3,6 +3,7 @@ data/
 models/
 article/
 markdown/
+raw_corpora/
 
 # Python built-in cache
 __pycache__/
