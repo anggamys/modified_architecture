@@ -68,13 +68,23 @@ def test_feature_extraction(
     bert_extraction.to(device)
     bert_extraction.eval()
 
-    # Tokenize sample text (concat tokens as sentence)
-    sample_text: str = " ".join(tokens[:10])  # Ambil 10 tokens pertama
+    # Tokenize token list (word-level) dengan is_split_into_words=True
+    # agar tokenizer bisa mengembalikan word_ids() — mapping subword → word index
+    tokens_list: list[str] = tokens[:10].tolist()  # Ambil 10 tokens pertama
 
     encoding = tokenizer(
-        sample_text, return_tensors="pt", padding=True, truncation=True, max_length=512
-    ).to(device)
+        tokens_list,
+        is_split_into_words=True,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=512,
+    )
 
+    # word_ids harus diambil sebelum .to(device) — ini Python list, bukan tensor
+    word_ids: list[list[int | None]] = [encoding.word_ids(batch_index=0)]
+
+    encoding = encoding.to(device)
     input_ids: Tensor = encoding["input_ids"]
     attention_mask: Tensor = encoding["attention_mask"]
 
@@ -126,6 +136,7 @@ def test_feature_extraction(
             char_ids=char_ids_tensor,
             input_ids=input_ids,
             attention_mask=attention_mask,
+            word_ids=word_ids,
             labels=labels,
         )
 
@@ -137,6 +148,7 @@ def test_feature_extraction(
             char_ids=char_ids_tensor,
             input_ids=input_ids,
             attention_mask=attention_mask,
+            word_ids=word_ids,
             labels=None,
         )
 

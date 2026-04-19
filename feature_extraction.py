@@ -224,44 +224,49 @@ class HybridModel(nn.Module):
         # CRF
         self.crf = CRF(num_classes)
 
+    def _align_char_to_bert(
+        self,
+        char_out: Tensor,
+        word_ids_batch: list[list[int | None]],
+        S_bert: int,
+    ) -> Tensor:
+        B, S_word, char_dim = char_out.shape
+        aligned = torch.zeros(B, S_bert, char_dim, device=char_out.device, dtype=char_out.dtype)
+
+        for b, word_ids in enumerate(word_ids_batch):
+            for t, word_id in enumerate(word_ids):
+                if t >= S_bert:
+                    break
+        
+                if word_id is not None and word_id < S_word:
+                    aligned[b, t] = char_out[b, word_id]
+
+        return aligned
+
     def forward(
         self,
         char_ids: Tensor,
         input_ids: Tensor,
         attention_mask: Tensor,
+        word_ids: list[list[int | None]],
         labels: Tensor | None = None,
     ):
-        bert_out = self.bert(input_ids, attention_mask)  # (B,S_bert,768)
-        char_out = self.char_cnn(char_ids)  # (B,S_char,128)
+        bert_out = self.bert(input_ids, attention_mask)  # (B, S_bert, 768)
+        char_out = self.char_cnn(char_ids)               # (B, S_word, 128)
 
-        # Align sequence lengths between BERT and CharCNN outputs
-        S_bert = bert_out.shape[1]
-        S_char = char_out.shape[1]
+        char_aligned = self._align_char_to_bert(
+            char_out, word_ids, S_bert=bert_out.shape[1]
+        )  # (B, S_bert, 128)
 
-        if S_bert != S_char:
-            # Pad the shorter sequence or truncate the longer one
-            target_seq_len = min(S_bert, S_char)
-
-            if S_bert > target_seq_len:
-                bert_out = bert_out[:, :target_seq_len, :]
-                attention_mask = attention_mask[:, :target_seq_len]
-
-            if S_char > target_seq_len:
-                char_out = char_out[:, :target_seq_len, :]
-
-        x = torch.cat([bert_out, char_out], dim=-1)  # (B,S,896)
-        x = F.relu(self.fusion(x))  # (B,S,256)
+        x = torch.cat([bert_out, char_aligned], dim=-1)  # (B, S_bert, 896)
+        x = F.relu(self.fusion(x))                       # (B, S_bert, fusion_dim)
         x = self.dropout(x)
 
-        emissions = self.classifier(x)  # (B,S,num_classes)
-
-        mask = attention_mask.bool()
+        emissions = self.classifier(x)   # (B, S_bert, num_classes)
+        mask = attention_mask.bool()     # (B, S_bert)
 
         if labels is not None:
-            # Truncate labels to match aligned sequence length
-            if labels.shape[1] > emissions.shape[1]:
-                labels = labels[:, : emissions.shape[1]]
-            loss = self.crf(emissions, labels, mask)  # CRF.forward already returns mean NLL
+            loss = self.crf(emissions, labels, mask)
             return loss
 
         else:
