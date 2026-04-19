@@ -7,11 +7,11 @@ from preprocess import (
     split_train_val_test,
 )
 
-from utils import dataInfo, log, log_level, argParser
 from feature_extraction import CharCNN, Bert
+from utils import dataInfo, log, log_level, argParser, dowloadModel
 
 
-def main(data_path: str):
+def main(data_path: str, model_name: str) -> None:
     sample_data = pd.read_csv(data_path)
     dataInfo(sample_data)
 
@@ -36,7 +36,9 @@ def main(data_path: str):
 
     char_extraction.to("cuda" if torch.cuda.is_available() else "cpu")
 
-    bert_extraction = Bert()
+    model_path = dowloadModel(model_name)
+
+    bert_extraction = Bert(model_name=model_path)
 
     log("BERT model initialized.", level=log_level.INFO)
 
@@ -50,10 +52,18 @@ if __name__ == "__main__":
             {
                 "flag": "--data_path",
                 "type": str,
+                "default": "./data/sample-anotasi-merge-valid.csv",
                 "help": "Path to the input CSV data file.",
                 "required": False,
-            }
+            },
+            {
+                "flag": "--model_name",
+                "type": str,
+                "default": "indobenchmark/indobert-base-p1",
+                "help": "Name of the Hugging Face model to download.",
+                "required": False,
+            },
         ],
     ).parse_args()
 
-    main(data_path=args.data_path if args.data_path else "data/sample_data.csv")
+    main(data_path=args.data_path, model_name=args.model_name)
