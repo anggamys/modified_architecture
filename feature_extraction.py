@@ -63,13 +63,13 @@ class CharCNN(nn.Module):
 class Bert(nn.Module):
     def __init__(
         self,
-        model_name: str = "indobenchmark/indobert-base-p1",
+        model_path: str,
         dropout: float = 0.1,
         freeze_bert: bool = True,
     ) -> None:
         super().__init__()
 
-        self.bert = AutoModel.from_pretrained(model_name)
+        self.bert = AutoModel.from_pretrained(model_path)
 
         if freeze_bert:
             for param in self.bert.parameters():
@@ -96,59 +96,63 @@ class CRF(nn.Module):
         super().__init__()
         self.num_tags = num_tags
 
-        # transition matrix
+        # transition[i, j] = skor transisi dari tag i ke tag j
         self.transitions = nn.Parameter(torch.randn(num_tags, num_tags))
+        # skor memulai / mengakhiri dari/ke tag tertentu
+        self.start_transitions = nn.Parameter(torch.randn(num_tags))
+        self.end_transitions = nn.Parameter(torch.randn(num_tags))
 
     def forward(self, emissions, tags, mask):
-        # negative log likelihood
-        log_likelihood = self._compute_log_likelihood(emissions, tags, mask)
-        return -log_likelihood
+        # Langsung return mean NLL — jangan di-negate lagi di luar
+        log_likelihood = self._log_likelihood(emissions, tags, mask)
+        return -log_likelihood.mean()
 
-    def _compute_log_likelihood(self, emissions, tags, mask):
-        # score dari path benar
+    def _log_likelihood(self, emissions, tags, mask):
         gold_score = self._score_sentence(emissions, tags, mask)
-
-        # semua kemungkinan path
         partition = self._compute_partition(emissions, mask)
-
         return gold_score - partition
 
     def _score_sentence(self, emissions, tags, mask):
         B, S, _ = emissions.shape
 
-        score = torch.zeros(B, device=emissions.device)
+        # mulai dari start transition ke tag pertama
+        score = self.start_transitions[tags[:, 0]]
+        score += emissions[:, 0].gather(1, tags[:, 0].unsqueeze(1)).squeeze(1)
 
-        for t in range(S):
-            emit_score = emissions[:, t].gather(1, tags[:, t].unsqueeze(1)).squeeze(1)
+        for t in range(1, S):
+            emit = emissions[:, t].gather(1, tags[:, t].unsqueeze(1)).squeeze(1)
+            trans = self.transitions[tags[:, t - 1], tags[:, t]]
+            score += (emit + trans) * mask[:, t].float()
 
-            if t > 0:
-                trans_score = self.transitions[tags[:, t - 1], tags[:, t]]
-            else:
-                trans_score = 0
+        # tambahkan end transition dari tag terakhir yang valid
+        last_tag_idx = mask.long().sum(1) - 1  # (B,)
+        last_tags = tags.gather(1, last_tag_idx.unsqueeze(1)).squeeze(1)  # (B,)
+        score += self.end_transitions[last_tags]
 
-            score += (emit_score + trans_score) * mask[:, t]
-
-        return score.sum()
+        return score
 
     def _compute_partition(self, emissions, mask):
         B, S, C = emissions.shape
 
-        alpha = emissions[:, 0]  # (B, C)
+        # inisiasi dengan start transitions + emisi posisi pertama
+        alpha = self.start_transitions.unsqueeze(0) + emissions[:, 0]  # (B, C)
 
         for t in range(1, S):
-            emit = emissions[:, t].unsqueeze(1)  # (B, 1, C)
-
+            emit = emissions[:, t].unsqueeze(1)   # (B, 1, C)
             trans = self.transitions.unsqueeze(0)  # (1, C, C)
 
+            # score[b, prev, next] = alpha[b, prev] + trans[prev, next] + emit[b, next]
             score = alpha.unsqueeze(2) + trans + emit  # (B, C, C)
+            new_alpha = torch.logsumexp(score, dim=1)  # (B, C)
 
-            alpha = torch.logsumexp(score, dim=1)
+            # freeze alpha di posisi padding (jangan update kalau mask=False)
+            mask_t = mask[:, t].unsqueeze(1)  # (B, 1)
+            alpha = torch.where(mask_t, new_alpha, alpha)
 
-            alpha = alpha * mask[:, t].unsqueeze(1) + alpha * (
-                ~mask[:, t].unsqueeze(1)
-            )
+        # tambahkan end transitions sebelum logsumexp final
+        alpha += self.end_transitions.unsqueeze(0)  # (B, C)
 
-        return torch.logsumexp(alpha, dim=1).sum()
+        return torch.logsumexp(alpha, dim=1)  # (B,) — per-sample, bukan .sum()
 
     def decode(self, emissions, mask):
         return self._viterbi_decode(emissions, mask)
@@ -156,20 +160,27 @@ class CRF(nn.Module):
     def _viterbi_decode(self, emissions, mask):
         B, S, C = emissions.shape
 
-        score = emissions[:, 0]
+        # inisiasi dengan start transitions
+        score = self.start_transitions.unsqueeze(0) + emissions[:, 0]  # (B, C)
         history = []
 
         for t in range(1, S):
-            broadcast_score = score.unsqueeze(2)
-            broadcast_trans = self.transitions.unsqueeze(0)
+            broadcast_score = score.unsqueeze(2)           # (B, C, 1)
+            broadcast_trans = self.transitions.unsqueeze(0)  # (1, C, C)
 
-            next_score = broadcast_score + broadcast_trans
-            best_score, best_path = next_score.max(dim=1)
+            next_score = broadcast_score + broadcast_trans  # (B, C, C)
+            best_score, best_path = next_score.max(dim=1)  # (B, C)
 
-            score = best_score + emissions[:, t]
+            new_score = best_score + emissions[:, t]
+
+            # freeze di posisi padding
+            mask_t = mask[:, t].unsqueeze(1)  # (B, 1)
+            score = torch.where(mask_t, new_score, score)
             history.append(best_path)
 
-        best_last_score, best_last_tag = score.max(dim=1)
+        # tambahkan end transitions sebelum argmax
+        score += self.end_transitions.unsqueeze(0)
+        _, best_last_tag = score.max(dim=1)  # (B,)
 
         paths = [best_last_tag]
 
@@ -177,7 +188,10 @@ class CRF(nn.Module):
             best_last_tag = hist.gather(1, best_last_tag.unsqueeze(1)).squeeze(1)
             paths.insert(0, best_last_tag)
 
-        paths = torch.stack(paths, dim=1)
+        paths = torch.stack(paths, dim=1)  # (B, S)
+
+        # zero-out padding positions
+        paths = paths * mask.long()
 
         return paths
 
@@ -193,7 +207,7 @@ class HybridModel(nn.Module):
 
         # encoder
         self.char_cnn = CharCNN(vocab_size=char_vocab_size)
-        self.bert = Bert()
+        self.bert = Bert(model_path="indobenchmark/indobert-base-p1")
 
         # ambil dimensi dinamis
         bert_dim = self.bert.bert.config.hidden_size
@@ -246,7 +260,7 @@ class HybridModel(nn.Module):
             # Truncate labels to match aligned sequence length
             if labels.shape[1] > emissions.shape[1]:
                 labels = labels[:, : emissions.shape[1]]
-            loss = -self.crf(emissions, labels, mask=mask)
+            loss = self.crf(emissions, labels, mask)  # CRF.forward already returns mean NLL
             return loss
 
         else:

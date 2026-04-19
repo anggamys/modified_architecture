@@ -2,9 +2,9 @@ import torch
 
 from transformers import AutoTokenizer
 
+from utils import log, log_level, dowloadModel
 from preprocess import prepare_char_ids
 from feature_extraction import CharCNN, Bert, HybridModel
-from utils import log, log_level, dowloadModel
 
 
 def test_feature_extraction(
