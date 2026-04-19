@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from transformers import AutoModel
+from transformers import PreTrainedModel
 
 
 class CharCNN(nn.Module):
@@ -63,13 +63,13 @@ class CharCNN(nn.Module):
 class Bert(nn.Module):
     def __init__(
         self,
-        model_path: str,
+        bert: PreTrainedModel,
         dropout: float = 0.1,
         freeze_bert: bool = True,
     ) -> None:
         super().__init__()
 
-        self.bert = AutoModel.from_pretrained(model_path)
+        self.bert = bert
 
         if freeze_bert:
             for param in self.bert.parameters():
