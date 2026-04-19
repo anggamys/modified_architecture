@@ -75,9 +75,9 @@ class Bert(nn.Module):
             for param in self.bert.parameters():
                 param.requires_grad = False
 
-        # unfreeze 2 layer terakhir
+        # unfreeze 4 layer terakhir (8–11) untuk adaptasi lebih baik di dataset kecil
         for name, param in self.bert.named_parameters():
-            if "encoder.layer.10" in name or "encoder.layer.11" in name:
+            if any(f"encoder.layer.{i}" in name for i in range(8, 12)):
                 param.requires_grad = True
 
         self.dropout = nn.Dropout(dropout)
@@ -225,8 +225,12 @@ class HybridModel(nn.Module):
         bert_dim = self.bert.bert.config.hidden_size
         char_dim = self.char_cnn.output_dim
 
-        # fusion + normalization
-        self.fusion = nn.Linear(bert_dim + char_dim, fusion_dim)
+        # CharCNN projection: angkat char_dim ke bert_dim agar bisa additive fusion
+        # Ini memberi CharCNN bobot representasi yang setara dengan BERT
+        self.char_proj = nn.Linear(char_dim, bert_dim)
+
+        # fusion: input bert_dim (setelah additive), bukan bert_dim + char_dim
+        self.fusion = nn.Linear(bert_dim, fusion_dim)
         self.fusion_norm = nn.LayerNorm(fusion_dim)
         self.dropout = nn.Dropout(0.1)
 
@@ -296,10 +300,12 @@ class HybridModel(nn.Module):
 
         char_aligned = self._align_char_to_bert(
             char_out, word_ids, S_bert=S_bert
-        )  # (B, S_bert, 128)
+        )  # (B, S_bert, char_dim)
 
-        x = torch.cat([bert_out, char_aligned], dim=-1)    # (B, S_bert, 896)
-        x = self.fusion_norm(F.relu(self.fusion(x)))       # (B, S_bert, fusion_dim)
+        # Additive fusion: project CharCNN ke bert_dim lalu tambahkan ke BERT output.
+        # Ini memberi CharCNN bobot yang setara tanpa dominasi BERT karena scale berbeda.
+        x = bert_out + self.char_proj(char_aligned)      # (B, S_bert, bert_dim)
+        x = self.fusion_norm(F.relu(self.fusion(x)))     # (B, S_bert, fusion_dim)
         x = self.dropout(x)
 
         emissions = self.classifier(x)   # (B, S_bert, num_classes)

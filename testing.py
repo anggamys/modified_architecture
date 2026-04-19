@@ -121,10 +121,10 @@ def test_feature_extraction(
 
     log(f"Number of POS classes: {num_classes}", level=log_level.INFO)
 
-    # Prepare labels untuk testing (dummy)
-    # Labels shape: (B, S) - sesuai dengan attention_mask
+    # Labels harus di level kata (word-level), bukan subword.
+    # _align_labels_to_bert akan memetakannya ke subword menggunakan word_ids.
     labels: Tensor = torch.zeros(
-        (input_ids.shape[0], input_ids.shape[1]),
+        (1, len(tokens_list)),
         dtype=torch.long,
     ).to(device)
 
