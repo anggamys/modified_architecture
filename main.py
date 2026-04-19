@@ -7,8 +7,8 @@ from preprocess import (
     split_train_val_test,
 )
 
-from feature_extraction import CharCNN, Bert
-from utils import dataInfo, log, log_level, argParser, dowloadModel
+from utils import dataInfo, log, log_level, argParser
+from testing import test_feature_extraction
 
 
 def main(data_path: str, model_name: str) -> None:
@@ -30,19 +30,18 @@ def main(data_path: str, model_name: str) -> None:
         level=log_level.INFO,
     )
 
-    char_extraction = CharCNN(vocab_size=len(char_vocab))
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    log("Feature extraction model initialized.", level=log_level.INFO)
+    # Test feature extraction
+    char_extraction, bert_extraction = test_feature_extraction(
+        sample_data=sample_data,
+        char_vocab=char_vocab,
+        model_name=model_name,
+        batch_size=32,
+        device=device,
+    )
 
-    char_extraction.to("cuda" if torch.cuda.is_available() else "cpu")
-
-    model_path = dowloadModel(model_name)
-
-    bert_extraction = Bert(model_name=model_path)
-
-    log("BERT model initialized.", level=log_level.INFO)
-
-    bert_extraction.to("cuda" if torch.cuda.is_available() else "cpu")
+    log("✓ Feature extraction models tested successfully", level=log_level.INFO)
 
 
 if __name__ == "__main__":

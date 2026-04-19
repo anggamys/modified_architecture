@@ -1,6 +1,7 @@
 import string
-import pandas as pd
 import unicodedata
+import numpy as np
+import pandas as pd
 
 from typing import Tuple
 from collections import Counter
@@ -234,3 +235,30 @@ def check_vocab_coverage(dataframe: pd.DataFrame, char_vocab: dict) -> None:
         )
 
         log(f"OOV detail: {oov_summary}", level=log_level.WARNING)
+
+
+def prepare_char_ids(tokens, char_vocab, max_word_len=50):
+    """
+    Konversi token strings menjadi char IDs.
+    Shape: (batch_size, max_word_len)
+    """
+    char_ids_list = []
+
+    for token in tokens:
+        # Normalize & clean sesuai pipeline preprocessing
+        token_clean = clean_text(normalize_text(token))
+
+        # Konversi ke char IDs
+        char_ids = [char_vocab.get(c, char_vocab.get("<UNK>", 1)) for c in token_clean]
+
+        # Padding/truncate ke max_word_len
+        if len(char_ids) < max_word_len:
+            char_ids = char_ids + [char_vocab.get("<PAD>", 0)] * (
+                max_word_len - len(char_ids)
+            )
+        else:
+            char_ids = char_ids[:max_word_len]
+
+        char_ids_list.append(char_ids)
+
+    return np.array(char_ids_list, dtype=np.int64)
