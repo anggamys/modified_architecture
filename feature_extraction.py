@@ -160,6 +160,8 @@ class CRF(nn.Module):
     def _viterbi_decode(self, emissions, mask):
         B, S, C = emissions.shape
 
+        seq_len = mask.long().sum(dim=1)  # (B,) — valid length per sample
+
         # inisiasi dengan start transitions
         score = self.start_transitions.unsqueeze(0) + emissions[:, 0]  # (B, C)
         history = []
@@ -173,24 +175,33 @@ class CRF(nn.Module):
 
             new_score = best_score + emissions[:, t]
 
-            # freeze di posisi padding
+            # freeze score di posisi padding
             mask_t = mask[:, t].unsqueeze(1)  # (B, 1)
             score = torch.where(mask_t, new_score, score)
             history.append(best_path)
 
         # tambahkan end transitions sebelum argmax
         score += self.end_transitions.unsqueeze(0)
-        _, best_last_tag = score.max(dim=1)  # (B,)
+        _, best_last_tag = score.max(dim=1)  # (B,) — correct: score frozen at last valid step
 
         paths = [best_last_tag]
 
-        for hist in reversed(history):
-            best_last_tag = hist.gather(1, best_last_tag.unsqueeze(1)).squeeze(1)
+        for rev_step, hist in enumerate(reversed(history)):
+            # cur_pos = posisi yang sedang diisi dalam paths (mundur dari S-1)
+            cur_pos = S - 1 - rev_step
+
+            prev_tag = hist.gather(1, best_last_tag.unsqueeze(1)).squeeze(1)
+
+            # Hanya update best_last_tag jika cur_pos masih di dalam rentang valid.
+            # Kalau padding (cur_pos >= seq_len[b]), biarkan best_last_tag tetap —
+            # agar backtracking tidak tercemar oleh history dari posisi padding.
+            is_padding = cur_pos >= seq_len  # (B,) bool
+            best_last_tag = torch.where(is_padding, best_last_tag, prev_tag)
             paths.insert(0, best_last_tag)
 
         paths = torch.stack(paths, dim=1)  # (B, S)
 
-        # zero-out padding positions
+        # zero-out posisi padding di output akhir
         paths = paths * mask.long()
 
         return paths
@@ -214,8 +225,9 @@ class HybridModel(nn.Module):
         bert_dim = self.bert.bert.config.hidden_size
         char_dim = self.char_cnn.output_dim
 
-        # fusion
+        # fusion + normalization
         self.fusion = nn.Linear(bert_dim + char_dim, fusion_dim)
+        self.fusion_norm = nn.LayerNorm(fusion_dim)
         self.dropout = nn.Dropout(0.1)
 
         # classifier
@@ -231,15 +243,41 @@ class HybridModel(nn.Module):
         S_bert: int,
     ) -> Tensor:
         B, S_word, char_dim = char_out.shape
-        aligned = torch.zeros(B, S_bert, char_dim, device=char_out.device, dtype=char_out.dtype)
+        aligned = char_out.new_zeros(B, S_bert, char_dim)
 
         for b, word_ids in enumerate(word_ids_batch):
+            # Konversi ke tensor: None → -1 (invalid), int → word index
+            wids = torch.tensor(
+                [-1 if w is None else w for w in word_ids[:S_bert]],
+                device=char_out.device,
+                dtype=torch.long,
+            )  # (S_bert,)
+
+            valid = (wids >= 0) & (wids < S_word)  # mask posisi yang punya word asli
+            aligned[b, valid] = char_out[b][wids[valid]]  # tensor gather, satu operasi
+
+        return aligned
+
+    def _align_labels_to_bert(
+        self,
+        labels: Tensor,
+        word_ids_batch: list[list[int | None]],
+        S_bert: int,
+    ) -> Tensor:
+        B = labels.shape[0]
+        aligned = labels.new_full((B, S_bert), -100)  # default: ignore
+
+        for b, word_ids in enumerate(word_ids_batch):
+            prev_word: int | None = None
             for t, word_id in enumerate(word_ids):
                 if t >= S_bert:
                     break
-        
-                if word_id is not None and word_id < S_word:
-                    aligned[b, t] = char_out[b, word_id]
+                if word_id is None:
+                    continue  # special token → tetap -100
+                if word_id != prev_word:  # first subword dari kata ini
+                    if word_id < labels.shape[1]:
+                        aligned[b, t] = labels[b, word_id]
+                prev_word = word_id
 
         return aligned
 
@@ -254,21 +292,34 @@ class HybridModel(nn.Module):
         bert_out = self.bert(input_ids, attention_mask)  # (B, S_bert, 768)
         char_out = self.char_cnn(char_ids)               # (B, S_word, 128)
 
+        S_bert = bert_out.shape[1]
+
         char_aligned = self._align_char_to_bert(
-            char_out, word_ids, S_bert=bert_out.shape[1]
+            char_out, word_ids, S_bert=S_bert
         )  # (B, S_bert, 128)
 
-        x = torch.cat([bert_out, char_aligned], dim=-1)  # (B, S_bert, 896)
-        x = F.relu(self.fusion(x))                       # (B, S_bert, fusion_dim)
+        x = torch.cat([bert_out, char_aligned], dim=-1)    # (B, S_bert, 896)
+        x = self.fusion_norm(F.relu(self.fusion(x)))       # (B, S_bert, fusion_dim)
         x = self.dropout(x)
 
         emissions = self.classifier(x)   # (B, S_bert, num_classes)
-        mask = attention_mask.bool()     # (B, S_bert)
 
         if labels is not None:
-            loss = self.crf(emissions, labels, mask)
+            # Align word-level labels ke subword-level (first-subword strategy)
+            aligned_labels = self._align_labels_to_bert(
+                labels, word_ids, S_bert=S_bert
+            )  # (B, S_bert), non-first dan special tokens = -100
+
+            # CRF mask: hanya posisi yang attention=1 DAN bukan ignore index
+            crf_mask = attention_mask.bool() & (aligned_labels != -100)  # (B, S_bert)
+
+            # CRF tidak terima -100 sebagai tag index → clamp ke 0 (ter-mask out)
+            safe_labels = aligned_labels.clamp(min=0)
+
+            loss = self.crf(emissions, safe_labels, crf_mask)
             return loss
 
         else:
-            preds = self.crf.decode(emissions, mask=mask)
+            crf_mask = attention_mask.bool()  # decode: mask = attention saja
+            preds = self.crf.decode(emissions, mask=crf_mask)
             return preds

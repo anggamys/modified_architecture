@@ -53,7 +53,7 @@ def main(data_path: str, model_name: str) -> None:
         dist = split_df["pos_tag"].value_counts(normalize=True)
         dist_str = " | ".join(f"{cls}: {pct:.4f}" for cls, pct in dist.items())
 
-        log(f"  {split_name}: {dist_str}", level=log_level.INFO)
+        log(f"{split_name}: {dist_str}", level=log_level.INFO)
 
     # Test feature extraction
     test_feature_extraction(
