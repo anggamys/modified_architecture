@@ -115,7 +115,7 @@ def main(data_path: str, model_name: str, epochs: int = 10) -> None:
         batch_size=16,
         shuffle=True,
         collate_fn=collate_fn,
-        num_workers=2,
+        num_workers=0,
         pin_memory=(device == "cuda"),
     )
 
@@ -124,7 +124,7 @@ def main(data_path: str, model_name: str, epochs: int = 10) -> None:
         batch_size=16,
         shuffle=False,
         collate_fn=collate_fn,
-        num_workers=2,
+        num_workers=0,
         pin_memory=(device == "cuda"),
     )
 
@@ -133,7 +133,7 @@ def main(data_path: str, model_name: str, epochs: int = 10) -> None:
         batch_size=16,
         shuffle=False,
         collate_fn=collate_fn,
-        num_workers=2,
+        num_workers=0,
         pin_memory=(device == "cuda"),
     )
 

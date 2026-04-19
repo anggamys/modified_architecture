@@ -125,8 +125,13 @@ class CRF(nn.Module):
             trans = self.transitions[tags[:, t - 1], tags[:, t]]
             score += (emit + trans) * mask[:, t].float()
 
-        # tambahkan end transition dari tag terakhir yang valid
-        last_tag_idx = mask.long().sum(1) - 1  # (B,)
+        # Cari POSISI (bukan count) dari token valid terakhir di tiap sampel.
+        # mask.sum()-1 salah karena mask non-contiguous (F,T,F,T,F) → sum=2 tapi
+        # posisi terakhir adalah index 3, bukan 1.
+        positions = torch.arange(S, device=mask.device).unsqueeze(0).expand(B, -1)
+        last_tag_idx = (positions * mask.long()).max(dim=1).values  # (B,)
+        last_tag_idx = last_tag_idx.clamp(min=0)  # guard: jika mask semua False
+
         last_tags = tags.gather(1, last_tag_idx.unsqueeze(1)).squeeze(1)  # (B,)
         score += self.end_transitions[last_tags]
 
@@ -326,8 +331,9 @@ class HybridModel(nn.Module):
 
             # --- CRF loss ---
             # CRF mask: posisi yang attention=1 DAN bukan ignore index
+            # CRF tidak terima -100 sebagai tag index → clamp ke [0, num_tags-1]
             crf_mask = attention_mask.bool() & (aligned_labels != -100)
-            safe_labels = aligned_labels.clamp(min=0)  # -100 → 0, ter-mask out di CRF
+            safe_labels = aligned_labels.clamp(min=0, max=self.crf.num_tags - 1)  # -100 → 0, ter-mask out di CRF
             crf_loss = self.crf(emissions, safe_labels, crf_mask)
 
             # --- CE loss ---
