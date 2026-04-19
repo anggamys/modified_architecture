@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from torch import Tensor
 from transformers import PreTrainedModel
 
@@ -213,6 +214,7 @@ class HybridModel(nn.Module):
         char_vocab_size: int,
         bert: PreTrainedModel,
         num_classes: int,
+        class_weights: Tensor | None = None,
         fusion_dim: int = 256,
     ) -> None:
         super().__init__()
@@ -226,7 +228,6 @@ class HybridModel(nn.Module):
         char_dim = self.char_cnn.output_dim
 
         # CharCNN projection: angkat char_dim ke bert_dim agar bisa additive fusion
-        # Ini memberi CharCNN bobot representasi yang setara dengan BERT
         self.char_proj = nn.Linear(char_dim, bert_dim)
 
         # fusion: input bert_dim (setelah additive), bukan bert_dim + char_dim
@@ -239,6 +240,13 @@ class HybridModel(nn.Module):
 
         # CRF
         self.crf = CRF(num_classes)
+
+        # CE loss dengan class weighting untuk handle imbalance.
+        # ignore_index=-100 otomatis mengecualikan non-first subword & special tokens.
+        self.ce_loss = nn.CrossEntropyLoss(
+            weight=class_weights,
+            ignore_index=-100,
+        )
 
     def _align_char_to_bert(
         self,
@@ -302,8 +310,7 @@ class HybridModel(nn.Module):
             char_out, word_ids, S_bert=S_bert
         )  # (B, S_bert, char_dim)
 
-        # Additive fusion: project CharCNN ke bert_dim lalu tambahkan ke BERT output.
-        # Ini memberi CharCNN bobot yang setara tanpa dominasi BERT karena scale berbeda.
+        # Additive fusion: project CharCNN ke bert_dim lalu tambahkan ke BERT output
         x = bert_out + self.char_proj(char_aligned)      # (B, S_bert, bert_dim)
         x = self.fusion_norm(F.relu(self.fusion(x)))     # (B, S_bert, fusion_dim)
         x = self.dropout(x)
@@ -311,21 +318,30 @@ class HybridModel(nn.Module):
         emissions = self.classifier(x)   # (B, S_bert, num_classes)
 
         if labels is not None:
-            # Align word-level labels ke subword-level (first-subword strategy)
+            # Align word-level labels ke subword-level (first-subword strategy).
+            # Non-first subwords dan special tokens mendapat -100 (ignore index).
             aligned_labels = self._align_labels_to_bert(
                 labels, word_ids, S_bert=S_bert
-            )  # (B, S_bert), non-first dan special tokens = -100
+            )  # (B, S_bert)
 
-            # CRF mask: hanya posisi yang attention=1 DAN bukan ignore index
-            crf_mask = attention_mask.bool() & (aligned_labels != -100)  # (B, S_bert)
+            # --- CRF loss ---
+            # CRF mask: posisi yang attention=1 DAN bukan ignore index
+            crf_mask = attention_mask.bool() & (aligned_labels != -100)
+            safe_labels = aligned_labels.clamp(min=0)  # -100 → 0, ter-mask out di CRF
+            crf_loss = self.crf(emissions, safe_labels, crf_mask)
 
-            # CRF tidak terima -100 sebagai tag index → clamp ke 0 (ter-mask out)
-            safe_labels = aligned_labels.clamp(min=0)
+            # --- CE loss ---
+            # CrossEntropyLoss(ignore_index=-100) menangani masking sendiri.
+            # Flatten ke (B*S_bert,) untuk CE.
+            ce_loss = self.ce_loss(
+                emissions.view(-1, emissions.shape[-1]),  # (B*S_bert, C)
+                aligned_labels.view(-1),                  # (B*S_bert,)
+            )
 
-            loss = self.crf(emissions, safe_labels, crf_mask)
-            return loss
+            # Hybrid loss: CRF sebagai sinyal utama, CE mendorong minority class
+            return crf_loss + 0.5 * ce_loss
 
         else:
-            crf_mask = attention_mask.bool()  # decode: mask = attention saja
+            crf_mask = attention_mask.bool()
             preds = self.crf.decode(emissions, mask=crf_mask)
             return preds
