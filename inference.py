@@ -110,7 +110,22 @@ def load_model(
     )
 
     state = torch.load(model_path, map_location=device)
-    model.load_state_dict(state)
+
+    # strict=False: ce_loss.weight adalah buffer CrossEntropyLoss yang hanya ada
+    # saat training (class_weights != None). Saat inference tidak dibutuhkan.
+    incompatible = model.load_state_dict(state, strict=False)
+
+    if incompatible.unexpected_keys:
+        log(
+            f"State dict keys dilewati (inference-only, aman): {incompatible.unexpected_keys}",
+            level=log_level.INFO,
+        )
+    if incompatible.missing_keys:
+        log(
+            f"State dict keys hilang (periksa arsitektur): {incompatible.missing_keys}",
+            level=log_level.WARNING,
+        )
+
     model.to(device)
     model.eval()
 
