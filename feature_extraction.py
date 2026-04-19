@@ -145,7 +145,7 @@ class CRF(nn.Module):
             alpha = torch.logsumexp(score, dim=1)
 
             alpha = alpha * mask[:, t].unsqueeze(1) + alpha * (
-                1 - mask[:, t].unsqueeze(1)
+                ~mask[:, t].unsqueeze(1)
             )
 
         return torch.logsumexp(alpha, dim=1).sum()
