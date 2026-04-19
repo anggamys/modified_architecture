@@ -14,14 +14,14 @@ class CharCNN(nn.Module):
         num_filters: int = 96,
         kernel_sizes: tuple[int, ...] = (2, 3, 4, 5),
         output_dim: int = 128,
-        dropout: float = 0.2,
+        dropout: float = 0.35,
     ) -> None:
         super().__init__()
 
         self.output_dim = output_dim  # penting untuk fusion
 
         self.char_emb = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
-        self.embed_dropout = nn.Dropout(0.1)
+        self.embed_dropout = nn.Dropout(0.15)
 
         self.convs = nn.ModuleList(
             [nn.Conv1d(emb_dim, num_filters, k) for k in kernel_sizes]

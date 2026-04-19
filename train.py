@@ -24,7 +24,7 @@ def build_optimizer(model: nn.Module) -> torch.optim.AdamW:
     optimizer = torch.optim.AdamW(
         [
             {"params": bert_params, "lr": 2e-5},
-            {"params": other_params, "lr": 1e-3},
+            {"params": other_params, "lr": 5e-4},
         ],
         weight_decay=0.01,  # standard untuk BERT fine-tuning
     )
