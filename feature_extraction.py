@@ -250,5 +250,5 @@ class HybridModel(nn.Module):
             return loss
 
         else:
-            preds = self.crf.viterbi_decode(emissions, mask=mask)
+            preds = self.crf.decode(emissions, mask=mask)
             return preds
