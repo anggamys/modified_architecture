@@ -22,9 +22,6 @@ def test_feature_extraction(
     log(f"Sample batch size: {len(sample_batch)}", level=log_level.INFO)
     log(f"Device: {device}", level=log_level.INFO)
 
-    # CharCNN extraction
-    log("[CharCNN]", level=log_level.INFO)
-
     char_extraction = CharCNN(vocab_size=len(char_vocab))
     char_extraction.to(device)
     char_extraction.eval()
@@ -37,28 +34,25 @@ def test_feature_extraction(
     char_ids_tensor = torch.from_numpy(char_ids).unsqueeze(0).to(device)  # (1, B, W)
 
     log(
-        f"Input shape (char_ids): {char_ids_tensor.shape} - (B, S, W)",
+        f"[CharCNN] Input shape (char_ids): {char_ids_tensor.shape} - (B, S, W)",
         level=log_level.INFO,
     )
 
     with torch.no_grad():
         char_output = char_extraction(char_ids_tensor)
 
-    log(f"Output shape: {char_output.shape}", level=log_level.INFO)
-    log(f"Output dtype: {char_output.dtype}", level=log_level.INFO)
+    log(f"[CharCNN] Output shape: {char_output.shape}", level=log_level.INFO)
+    log(f"[CharCNN] Output dtype: {char_output.dtype}", level=log_level.INFO)
     log(
-        f"Output mean: {char_output.mean().item():.6f}, std: {char_output.std().item():.6f}",
+        f"[CharCNN] Output mean: {char_output.mean().item():.6f}, std: {char_output.std().item():.6f}",
         level=log_level.INFO,
     )
 
     # Log sample output values
     log(
-        f"Sample output values (first 5): {char_output.view(-1)[:5].cpu().numpy()}",
+        f"[CharCNN] Sample output values (first 5): {char_output.view(-1)[:5].cpu().numpy()}",
         level=log_level.INFO,
     )
-
-    # Bert extraction
-    log("[BERT]", level=log_level.INFO)
 
     model_path = dowloadModel(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -74,11 +68,17 @@ def test_feature_extraction(
         sample_text, return_tensors="pt", padding=True, truncation=True, max_length=512
     ).to(device)
 
-    log(f"Input tokens: {len(tokens[:10])} tokens", level=log_level.INFO)
-    log(f"Tokenized length: {encoding['input_ids'].shape[1]}", level=log_level.INFO)
-    log(f"Input shape (input_ids): {encoding['input_ids'].shape}", level=log_level.INFO)
+    log(f"[BERT] Input tokens: {len(tokens[:10])} tokens", level=log_level.INFO)
     log(
-        f"Attention mask shape: {encoding['attention_mask'].shape}",
+        f"[BERT] Tokenized length: {encoding['input_ids'].shape[1]}",
+        level=log_level.INFO,
+    )
+    log(
+        f"[BERT] Input shape (input_ids): {encoding['input_ids'].shape}",
+        level=log_level.INFO,
+    )
+    log(
+        f"[BERT] Attention mask shape: {encoding['attention_mask'].shape}",
         level=log_level.INFO,
     )
 
@@ -87,16 +87,16 @@ def test_feature_extraction(
             input_ids=encoding["input_ids"], attention_mask=encoding["attention_mask"]
         )
 
-    log(f"Output shape: {bert_output.shape}", level=log_level.INFO)
-    log(f"Output dtype: {bert_output.dtype}", level=log_level.INFO)
+    log(f"[BERT] Output shape: {bert_output.shape}", level=log_level.INFO)
+    log(f"[BERT] Output dtype: {bert_output.dtype}", level=log_level.INFO)
     log(
-        f"Output mean: {bert_output.mean().item():.6f}, std: {bert_output.std().item():.6f}",
+        f"[BERT] Output mean: {bert_output.mean().item():.6f}, std: {bert_output.std().item():.6f}",
         level=log_level.INFO,
     )
 
     # Log sample output values
     log(
-        f"Sample output values (first 5): {bert_output.view(-1)[:5].cpu().numpy()}",
+        f"[BERT] Sample output values (first 5): {bert_output.view(-1)[:5].cpu().numpy()}",
         level=log_level.INFO,
     )
 

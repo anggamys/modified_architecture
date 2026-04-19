@@ -241,6 +241,7 @@ def calculate_class_weights(labels: pd.Series, smooth: float = 1.0) -> Dict[str,
         f"{cls}: {count:,} tokens ({count / len(labels) * 100:.4f}%)"
         for cls, count in value_counts.items()
     ]
+
     log(f"Original class distribution: {' | '.join(dist_parts)}", level=log_level.INFO)
 
     # Hitung weights menggunakan inverse frequency
