@@ -238,7 +238,7 @@ class HybridModel(nn.Module):
         # fusion: input bert_dim (setelah additive), bukan bert_dim + char_dim
         self.fusion = nn.Linear(bert_dim, fusion_dim)
         self.fusion_norm = nn.LayerNorm(fusion_dim)
-        self.dropout = nn.Dropout(0.1)
+        self.dropout = nn.Dropout(0.3)
 
         # classifier
         self.classifier = nn.Linear(fusion_dim, num_classes)

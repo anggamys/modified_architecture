@@ -4,6 +4,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.utils.data import DataLoader
 from transformers import get_linear_schedule_with_warmup
+from sklearn.metrics import classification_report
 
 from utils import log, log_level
 
@@ -25,7 +26,7 @@ def build_optimizer(model: nn.Module) -> torch.optim.AdamW:
             {"params": bert_params, "lr": 2e-5},
             {"params": other_params, "lr": 1e-3},
         ],
-        weight_decay=0.01,
+        weight_decay=0.1,  # naik dari 0.01 untuk counter overfitting
     )
 
     log(
@@ -63,6 +64,29 @@ def compute_accuracy(preds: list[int], labels: list[int]) -> float:
         return 0.0
     correct = sum(p == l for p, l in zip(preds, labels))  # noqa: E741
     return correct / len(labels)
+
+
+def compute_classification_report(
+    preds: list[int],
+    labels: list[int],
+    idx_to_class: dict[int, str],
+) -> str:
+    # Ambil hanya kelas yang muncul di preds atau labels (hindari baris kosong)
+    present = sorted(set(preds) | set(labels))
+    target_names = [idx_to_class.get(i, str(i)) for i in present]
+
+    report: str = classification_report(
+        labels,
+        preds,
+        labels=present,
+        target_names=target_names,
+        zero_division=0,
+        digits=4,
+    )
+
+    log(f"Classification Report:\n{report}", level=log_level.INFO)
+    return report
+
 
 
 def train_one_epoch(
@@ -166,6 +190,7 @@ def train_model(
     val_loader: DataLoader,
     device: str,
     epochs: int = 10,
+    patience: int = 3,
     checkpoint_path: str = "best_model.pt",
 ) -> None:
     optimizer = build_optimizer(model)
@@ -174,6 +199,7 @@ def train_model(
     scheduler = build_scheduler(optimizer, total_steps)
 
     best_val_loss = float("inf")
+    no_improve_count = 0  # counter untuk early stopping
 
     for epoch in range(1, epochs + 1):
         log(f"Epoch {epoch}/{epochs}", level=log_level.INFO)
@@ -189,7 +215,24 @@ def train_model(
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            no_improve_count = 0
             torch.save(model.state_dict(), checkpoint_path)
             log(f"Checkpoint saved → {checkpoint_path}", level=log_level.INFO)
+        else:
+            no_improve_count += 1
+            log(
+                f"No improvement ({no_improve_count}/{patience})",
+                level=log_level.INFO,
+            )
 
+            if no_improve_count >= patience:
+                log(
+                    f"Early stopping triggered at epoch {epoch}. "
+                    f"Best val loss: {best_val_loss:.4f}",
+                    level=log_level.INFO,
+                )
+                break
+
+    # Restore best weights sebelum return
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     log(f"Training selesai. Best val loss: {best_val_loss:.4f}", level=log_level.INFO)

@@ -13,13 +13,13 @@ from preprocess import (
     create_torch_weight_tensor,
 )
 
-from train import train_model, evaluate, compute_accuracy
+from train import train_model, evaluate, compute_accuracy, compute_classification_report
 from feature_extraction import HybridModel
 from dataset import POSDataset, make_collate_fn
 from utils import dataInfo, log, log_level, argParser, dowloadModel
 
 
-def main(data_path: str, model_name: str, epochs: int = 10) -> None:
+def main(data_path: str, model_name: str, epochs: int = 10, patience: int = 3, batch_size: int = 16) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(f"Using device: {device}", level=log_level.INFO)
 
@@ -112,7 +112,7 @@ def main(data_path: str, model_name: str, epochs: int = 10) -> None:
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=16,
+        batch_size=batch_size,
         shuffle=True,
         collate_fn=collate_fn,
         num_workers=0,
@@ -121,7 +121,7 @@ def main(data_path: str, model_name: str, epochs: int = 10) -> None:
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=16,
+        batch_size=batch_size,
         shuffle=False,
         collate_fn=collate_fn,
         num_workers=0,
@@ -130,7 +130,7 @@ def main(data_path: str, model_name: str, epochs: int = 10) -> None:
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=16,
+        batch_size=batch_size,
         shuffle=False,
         collate_fn=collate_fn,
         num_workers=0,
@@ -149,19 +149,19 @@ def main(data_path: str, model_name: str, epochs: int = 10) -> None:
         val_loader=val_loader,
         device=device,
         epochs=epochs,
+        patience=patience,
         checkpoint_path="best_model.pt",
     )
 
-    # ── Final evaluation pada test set (hanya sekali, setelah training selesai) ──
-    # Load checkpoint terbaik sebelum evaluasi agar tidak pakai model epoch terakhir
-    model.load_state_dict(torch.load("best_model.pt", map_location=device))
-    log("Loaded best checkpoint untuk final evaluation.", level=log_level.INFO)
-
+    # Final evaluation pada test set (hanya sekali, setelah training selesai)
+    # train_model sudah me-restore best checkpoint sebelum return
     test_loss, test_preds, test_labels = evaluate(model, test_loader, device)
     test_acc = compute_accuracy(test_preds, test_labels)
 
     log(f"[Test] Loss     : {test_loss:.4f}", level=log_level.INFO)
     log(f"[Test] Accuracy : {test_acc:.4f} ({test_acc * 100:.2f}%)", level=log_level.INFO)
+
+    compute_classification_report(test_preds, test_labels, idx_to_class)
 
 
 if __name__ == "__main__":
@@ -185,8 +185,22 @@ if __name__ == "__main__":
             {
                 "flag": "--epochs",
                 "type": int,
-                "default": 10,
-                "help": "Number of training epochs.",
+                "default": 20,
+                "help": "Maximum number of training epochs.",
+                "required": False,
+            },
+            {
+                "flag": "--patience",
+                "type": int,
+                "default": 3,
+                "help": "Early stopping patience (epochs without val improvement).",
+                "required": False,
+            },
+            {
+                "flag": "--batch_size",
+                "type": int,
+                "default": 16,
+                "help": "DataLoader batch size.",
                 "required": False,
             },
         ],
@@ -196,4 +210,6 @@ if __name__ == "__main__":
         data_path=args.data_path,
         model_name=args.model_name,
         epochs=args.epochs,
+        patience=args.patience,
+        batch_size=args.batch_size,
     )
