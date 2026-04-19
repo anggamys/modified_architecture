@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from transformers import AutoModel
-from torchcrf import CRF  # type: ignore
 
 
 class CharCNN(nn.Module):
@@ -92,6 +91,97 @@ class Bert(nn.Module):
         return x
 
 
+class CRF(nn.Module):
+    def __init__(self, num_tags):
+        super().__init__()
+        self.num_tags = num_tags
+
+        # transition matrix
+        self.transitions = nn.Parameter(torch.randn(num_tags, num_tags))
+
+    def forward(self, emissions, tags, mask):
+        # negative log likelihood
+        log_likelihood = self._compute_log_likelihood(emissions, tags, mask)
+        return -log_likelihood
+
+    def _compute_log_likelihood(self, emissions, tags, mask):
+        # score dari path benar
+        gold_score = self._score_sentence(emissions, tags, mask)
+
+        # semua kemungkinan path
+        partition = self._compute_partition(emissions, mask)
+
+        return gold_score - partition
+
+    def _score_sentence(self, emissions, tags, mask):
+        B, S, _ = emissions.shape
+
+        score = torch.zeros(B, device=emissions.device)
+
+        for t in range(S):
+            emit_score = emissions[:, t].gather(1, tags[:, t].unsqueeze(1)).squeeze(1)
+
+            if t > 0:
+                trans_score = self.transitions[tags[:, t - 1], tags[:, t]]
+            else:
+                trans_score = 0
+
+            score += (emit_score + trans_score) * mask[:, t]
+
+        return score.sum()
+
+    def _compute_partition(self, emissions, mask):
+        B, S, C = emissions.shape
+
+        alpha = emissions[:, 0]  # (B, C)
+
+        for t in range(1, S):
+            emit = emissions[:, t].unsqueeze(1)  # (B, 1, C)
+
+            trans = self.transitions.unsqueeze(0)  # (1, C, C)
+
+            score = alpha.unsqueeze(2) + trans + emit  # (B, C, C)
+
+            alpha = torch.logsumexp(score, dim=1)
+
+            alpha = alpha * mask[:, t].unsqueeze(1) + alpha * (
+                1 - mask[:, t].unsqueeze(1)
+            )
+
+        return torch.logsumexp(alpha, dim=1).sum()
+
+    def decode(self, emissions, mask):
+        return self._viterbi_decode(emissions, mask)
+
+    def _viterbi_decode(self, emissions, mask):
+        B, S, C = emissions.shape
+
+        score = emissions[:, 0]
+        history = []
+
+        for t in range(1, S):
+            broadcast_score = score.unsqueeze(2)
+            broadcast_trans = self.transitions.unsqueeze(0)
+
+            next_score = broadcast_score + broadcast_trans
+            best_score, best_path = next_score.max(dim=1)
+
+            score = best_score + emissions[:, t]
+            history.append(best_path)
+
+        best_last_score, best_last_tag = score.max(dim=1)
+
+        paths = [best_last_tag]
+
+        for hist in reversed(history):
+            best_last_tag = hist.gather(1, best_last_tag.unsqueeze(1)).squeeze(1)
+            paths.insert(0, best_last_tag)
+
+        paths = torch.stack(paths, dim=1)
+
+        return paths
+
+
 class HybridModel(nn.Module):
     def __init__(
         self,
@@ -117,7 +207,7 @@ class HybridModel(nn.Module):
         self.classifier = nn.Linear(fusion_dim, num_classes)
 
         # CRF
-        self.crf = CRF(num_classes, batch_first=True)
+        self.crf = CRF(num_classes)
 
     def forward(
         self,
