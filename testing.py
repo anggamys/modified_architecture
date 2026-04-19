@@ -105,6 +105,7 @@ def test_feature_extraction(
     hybrid_model: HybridModel = HybridModel(
         char_vocab_size=len(char_vocab),
         num_classes=num_classes,
+        bert=bert_model,
     ).to(device)
     hybrid_model.eval()
 

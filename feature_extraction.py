@@ -200,6 +200,7 @@ class HybridModel(nn.Module):
     def __init__(
         self,
         char_vocab_size: int,
+        bert: PreTrainedModel,
         num_classes: int,
         fusion_dim: int = 256,
     ) -> None:
@@ -207,7 +208,7 @@ class HybridModel(nn.Module):
 
         # encoder
         self.char_cnn = CharCNN(vocab_size=char_vocab_size)
-        self.bert = Bert(model_path="indobenchmark/indobert-base-p1")
+        self.bert = Bert(bert)
 
         # ambil dimensi dinamis
         bert_dim = self.bert.bert.config.hidden_size
