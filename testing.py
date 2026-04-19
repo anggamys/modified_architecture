@@ -14,13 +14,7 @@ def test_feature_extraction(
     batch_size=32,
     device="cuda" if torch.cuda.is_available() else "cpu",
 ):
-    """
-    Test feature extraction pada sample batch.
-    Log output shapes dan statistik.
-    """
-
     log("Testing feature extraction", level=log_level.INFO)
-    log(f"{'=' * 60}\n", level=log_level.INFO)
 
     # Ambil sample batch
     sample_batch = sample_data.head(batch_size).copy()
@@ -28,8 +22,8 @@ def test_feature_extraction(
     log(f"Sample batch size: {len(sample_batch)}", level=log_level.INFO)
     log(f"Device: {device}", level=log_level.INFO)
 
-    # ===== CharCNN =====
-    log("\n[CharCNN]", level=log_level.INFO)
+    # CharCNN extraction
+    log("[CharCNN]", level=log_level.INFO)
 
     char_extraction = CharCNN(vocab_size=len(char_vocab))
     char_extraction.to(device)
@@ -57,8 +51,14 @@ def test_feature_extraction(
         level=log_level.INFO,
     )
 
+    # Log sample output values
+    log(
+        f"Sample output values (first 5): {char_output.view(-1)[:5].cpu().numpy()}",
+        level=log_level.INFO,
+    )
+
     # Bert extraction
-    log("\n[BERT]", level=log_level.INFO)
+    log("[BERT]", level=log_level.INFO)
 
     model_path = dowloadModel(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -94,13 +94,15 @@ def test_feature_extraction(
         level=log_level.INFO,
     )
 
-    # ===== Summary =====
-    log(f"\n{'=' * 60}", level=log_level.INFO)
-    log("SUMMARY", level=log_level.INFO)
-    log(f"{'=' * 60}", level=log_level.INFO)
-    log(f"CharCNN output dim: {char_output.shape[-1]}", level=log_level.INFO)
-    log(f"BERT output dim: {bert_output.shape[-1]}", level=log_level.INFO)
-    log("Both outputs can be concatenated for hybrid model ✓", level=log_level.INFO)
-    log(f"{'=' * 60}\n", level=log_level.INFO)
+    # Log sample output values
+    log(
+        f"Sample output values (first 5): {bert_output.view(-1)[:5].cpu().numpy()}",
+        level=log_level.INFO,
+    )
+
+    log(
+        f"Conclusion: CharCNN output dim: {char_output.shape[-1]}, BERT output dim: {bert_output.shape[-1]}",
+        level=log_level.INFO,
+    )
 
     return char_extraction, bert_extraction

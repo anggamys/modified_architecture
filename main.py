@@ -12,6 +12,9 @@ from testing import test_feature_extraction
 
 
 def main(data_path: str, model_name: str) -> None:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    log(f"Using device: {device}", level=log_level.INFO)
+
     sample_data = pd.read_csv(data_path)
     dataInfo(sample_data)
 
@@ -30,18 +33,14 @@ def main(data_path: str, model_name: str) -> None:
         level=log_level.INFO,
     )
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
     # Test feature extraction
-    char_extraction, bert_extraction = test_feature_extraction(
-        sample_data=sample_data,
+    test_feature_extraction(
+        sample_data=train_df,
         char_vocab=char_vocab,
         model_name=model_name,
         batch_size=32,
         device=device,
     )
-
-    log("✓ Feature extraction models tested successfully", level=log_level.INFO)
 
 
 if __name__ == "__main__":
