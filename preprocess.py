@@ -39,17 +39,6 @@ def split_train_val_test(
     test_ratio: float = 0.125,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    Split data dengan stratifikasi by:
-    1. Document groups (GroupShuffleSplit)
-    2. Label distribution (pos_tag)
-    3. MLU buckets (token complexity)
-
-    Ini memastikan setiap split memiliki:
-    - Dokumen yang berbeda (no data leakage)
-    - Distribusi class yang balanced
-    - Representasi complexity yang sama
-    """
     total = train_ratio + val_ratio + test_ratio
     if abs(total - 1.0) > 1e-6:
         raise ValueError(
@@ -240,33 +229,19 @@ def _log_char_distribution(char_freq: Counter, min_freq: int = 5) -> None:
 
 
 def calculate_mlu(tokens: pd.Series) -> float:
-    """
-    Hitung Mean Length of Utterance (jumlah characters per token).
-    Berguna untuk stratifikasi complexity.
-    """
+    # Mean Length of Utterance (MLU) = rata-rata panjang token dalam kalimat
     return tokens.astype(str).str.len().mean()
 
 
 def calculate_class_weights(labels: pd.Series, smooth: float = 1.0) -> Dict[str, float]:
-    """
-    Hitung class weights untuk handle imbalance.
-
-    Args:
-        labels: Series berisi class labels
-        smooth: smoothing factor untuk menghindari division by zero
-
-    Returns:
-        Dict mapping class -> weight (normalized)
-
-    Formula: weight = 1 / (frequency + smooth)
-    """
     value_counts = labels.value_counts()
 
-    # Log distribution sebelum weight calculation
-    log("Original class distribution:", level=log_level.INFO)
-    for cls, count in value_counts.items():
-        pct = (count / len(labels)) * 100
-        log(f"  {cls}: {count:,} tokens ({pct:.4f}%)", level=log_level.INFO)
+    # Log distribution sebelum weight calculation (joined into single line)
+    dist_parts = [
+        f"{cls}: {count:,} tokens ({count / len(labels) * 100:.4f}%)"
+        for cls, count in value_counts.items()
+    ]
+    log(f"Original class distribution: {' | '.join(dist_parts)}", level=log_level.INFO)
 
     # Hitung weights menggunakan inverse frequency
     weights = {}
@@ -288,9 +263,9 @@ def calculate_class_weights(labels: pd.Series, smooth: float = 1.0) -> Dict[str,
                 0.5 + (weights[cls] - min_weight) / (max_weight - min_weight) * 1.5
             )
 
-    log("Calculated class weights:", level=log_level.INFO)
-    for cls, weight in sorted(weights.items()):
-        log(f"  {cls}: {weight:.4f}", level=log_level.INFO)
+    # Log calculated weights (joined into single line)
+    weight_parts = [f"{cls}: {weight:.4f}" for cls, weight in sorted(weights.items())]
+    log(f"Calculated class weights: {' | '.join(weight_parts)}", level=log_level.INFO)
 
     return weights
 
@@ -298,16 +273,6 @@ def calculate_class_weights(labels: pd.Series, smooth: float = 1.0) -> Dict[str,
 def create_torch_weight_tensor(
     weights: Dict[str, float], class_to_idx: Dict[str, int]
 ) -> torch.Tensor:
-    """
-    Convert class weights dict ke torch tensor untuk nn.CrossEntropyLoss.
-
-    Args:
-        weights: Dict dari class -> weight
-        class_to_idx: Mapping class label ke index
-
-    Returns:
-        torch.Tensor of shape (num_classes,)
-    """
     num_classes = len(class_to_idx)
     weight_tensor = torch.zeros(num_classes)
 
@@ -364,10 +329,6 @@ def check_vocab_coverage(dataframe: pd.DataFrame, char_vocab: dict) -> None:
 
 
 def prepare_char_ids(tokens, char_vocab, max_word_len=50):
-    """
-    Konversi token strings menjadi char IDs.
-    Shape: (batch_size, max_word_len)
-    """
     char_ids_list = []
 
     for token in tokens:
