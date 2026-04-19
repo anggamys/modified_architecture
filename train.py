@@ -26,7 +26,7 @@ def build_optimizer(model: nn.Module) -> torch.optim.AdamW:
             {"params": bert_params, "lr": 2e-5},
             {"params": other_params, "lr": 1e-3},
         ],
-        weight_decay=0.1,  # naik dari 0.01 untuk counter overfitting
+        weight_decay=0.01,  # standard untuk BERT fine-tuning
     )
 
     log(
