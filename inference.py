@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 from transformers import AutoModel, AutoTokenizer
 
+from utils import log, log_level
 from feature_extraction import HybridModel
 from preprocess import prepare_char_ids, normalize_text, clean_text
-from utils import log, log_level
 
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -192,16 +192,14 @@ def _predict_batch(
         words_batch,
         is_split_into_words=True,
         return_tensors="pt",
-        padding=True,           # pad ke kalimat terpanjang dalam batch
+        padding=True,  # pad ke kalimat terpanjang dalam batch
         truncation=True,
         max_length=max_seq_len,
     )
 
-    input_ids = encoding["input_ids"].to(device)          # (B, S_bert)
-    attention_mask = encoding["attention_mask"].to(device) # (B, S_bert)
-    word_ids_batch = [
-        encoding.word_ids(batch_index=i) for i in range(len(words_batch))
-    ]
+    input_ids = encoding["input_ids"].to(device)  # (B, S_bert)
+    attention_mask = encoding["attention_mask"].to(device)  # (B, S_bert)
+    word_ids_batch = [encoding.word_ids(batch_index=i) for i in range(len(words_batch))]
 
     max_words = max(len(w) for w in words_batch)
     char_ids_list: list[np.ndarray] = []
@@ -238,6 +236,15 @@ def _predict_batch(
     return _decode_preds(preds, word_ids_batch, words_batch, idx_to_class)
 
 
+def _part_path(output_dir: Path, stem: str, part: int, suffix: str) -> Path:
+    return output_dir / f"{stem}_part{part:03d}{suffix}"
+
+
+def _source_path(output_dir: Path, stem: str, file_id: str, suffix: str) -> Path:
+    safe_id = re.sub(r"[^\w\-]", "_", file_id)
+    return output_dir / f"{stem}_{safe_id}{suffix}"
+
+
 def run_inference(
     sentences: list[tuple[str, str]],
     model: HybridModel,
@@ -250,24 +257,102 @@ def run_inference(
     max_word_len: int = 50,
     log_every: int = 5_000,
     flush_every: int = 50_000,
+    split_by: str = "file",  # "file" | "rows" | "none"
+    rows_per_file: int = 500_000,  # aktif hanya jika split_by="rows"
 ) -> int:
     total = len(sentences)
     total_tokens = 0
     buffer: list[dict] = []
-    header_written = False
     output = Path(output_path)
     use_amp = device == "cuda"
 
-    # Iterasi per-batch, bukan per-kalimat
+    # Siapkan direktori output untuk mode split
+    if split_by in ("file", "rows"):
+        output_dir = output.parent / output.stem  # ./data_pseudo_label/
+        output_dir.mkdir(parents=True, exist_ok=True)
+        log(f"Output folder: {output_dir}/", level=log_level.INFO)
+    else:
+        output_dir = output.parent  # satu file langsung di parent dir
+
+    stem = output.stem
+    suffix = output.suffix
+
+    # --- state untuk split ---
+    writers: dict[str, bool] = {}  # path_str → header_sudah_ditulis?
+    current_part = 1
+    sent_in_part = 0  # jumlah KALIMAT (bukan token) di part ini
+
+    def _flush(buf: list[dict]) -> None:
+        nonlocal current_part, sent_in_part
+
+        if not buf:
+            return
+
+        chunk_df = pd.DataFrame(buf)
+
+        if split_by == "none":
+            dest = output
+            mode = "w" if str(dest) not in writers else "a"
+            chunk_df.to_csv(
+                dest,
+                mode=mode,
+                index=False,
+                header=(str(dest) not in writers),
+                encoding="utf-8-sig",
+            )
+            writers[str(dest)] = True
+
+        elif split_by == "file":
+            for fid, grp in chunk_df.groupby("file_id", sort=False):
+                dest = _source_path(output_dir, stem, str(fid), suffix)
+                key = str(dest)
+                mode = "w" if key not in writers else "a"
+                grp.to_csv(
+                    dest,
+                    mode=mode,
+                    index=False,
+                    header=(key not in writers),
+                    encoding="utf-8-sig",
+                )
+                writers[key] = True
+
+        elif split_by == "rows":
+            sent_ids_in_buf = chunk_df["sentence_id"].unique()
+            for sid in sent_ids_in_buf:
+                rows = chunk_df[chunk_df["sentence_id"] == sid]
+                dest = _part_path(output_dir, stem, current_part, suffix)
+                key = str(dest)
+                mode = "w" if key not in writers else "a"
+                rows.to_csv(
+                    dest,
+                    mode=mode,
+                    index=False,
+                    header=(key not in writers),
+                    encoding="utf-8-sig",
+                )
+                writers[key] = True
+                sent_in_part += 1
+
+                if sent_in_part >= rows_per_file:
+                    current_part += 1
+                    sent_in_part = 0
+
+    # --- loop utama ---
     for batch_start in range(0, total, batch_size):
         batch = sentences[batch_start : batch_start + batch_size]
-        file_ids   = [fid  for fid, _    in batch]
+        file_ids = [fid for fid, _ in batch]
         words_batch = [sent.split() for _, sent in batch]
-        sent_ids   = list(range(batch_start + 1, batch_start + len(batch) + 1))
+        sent_ids = list(range(batch_start + 1, batch_start + len(batch) + 1))
 
         tags_batch = _predict_batch(
-            words_batch, model, char_vocab, idx_to_class,
-            tokenizer, device, max_word_len, use_amp=use_amp,
+            words_batch,
+            model,
+            char_vocab,
+            idx_to_class,
+            tokenizer,
+            device,
+            max_word_len,
+            use_amp=use_amp,
         )
 
         for file_id, global_sent_id, words, tags in zip(
@@ -289,28 +374,24 @@ def run_inference(
         if processed % log_every == 0 or processed >= total:
             log(
                 f"Inference {processed:,}/{total:,} kalimat"
-                f" | total_ditulis={total_tokens:,} token",
+                f" | Total ditulis = {total_tokens:,} token",
                 level=log_level.INFO,
             )
 
         if len(buffer) >= flush_every or processed >= total:
-            chunk_df = pd.DataFrame(buffer)
-            chunk_df.to_csv(
-                output,
-                mode="w" if not header_written else "a",
-                index=False,
-                header=not header_written,
-                encoding="utf-8-sig",
-            )
-
+            _flush(buffer)
             total_tokens += len(buffer)
-            header_written = True
             buffer.clear()
 
+    # --- ringkasan file output ---
+    written_files = list(writers.keys())
     log(
-        f"Selesai: {total_tokens:,} token dari {total:,} kalimat → {output}",
+        f"Selesai: {total_tokens:,} token dari {total:,} kalimat"
+        f" → {len(written_files)} file CSV",
         level=log_level.INFO,
     )
+    for fpath in written_files:
+        log(f"  {fpath}", level=log_level.INFO)
 
     return total_tokens
 
@@ -374,6 +455,26 @@ def parse_args() -> argparse.Namespace:
         help="Jumlah kalimat per batch GPU (naikkan jika VRAM masih longgar, turunkan jika OOM)",
     )
 
+    parser.add_argument(
+        "--split_by",
+        type=str,
+        default="file",
+        choices=["file", "rows", "none"],
+        help=(
+            "Strategi pemecahan output CSV. "
+            "'file' = 1 CSV per file sumber (default). "
+            "'rows' = pecah per N kalimat (lihat --rows_per_file). "
+            "'none' = satu file tunggal."
+        ),
+    )
+
+    parser.add_argument(
+        "--rows_per_file",
+        type=int,
+        default=500_000,
+        help="Batas jumlah kalimat per file output (aktif hanya jika --split_by=rows)",
+    )
+
     return parser.parse_args()
 
 
@@ -411,6 +512,8 @@ def main() -> None:
         device,
         output_path=args.output,
         batch_size=args.batch_size,
+        split_by=args.split_by,
+        rows_per_file=args.rows_per_file,
     )
 
     log(

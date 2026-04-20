@@ -144,7 +144,7 @@ class CRF(nn.Module):
         alpha = self.start_transitions.unsqueeze(0) + emissions[:, 0]  # (B, C)
 
         for t in range(1, S):
-            emit = emissions[:, t].unsqueeze(1)   # (B, 1, C)
+            emit = emissions[:, t].unsqueeze(1)  # (B, 1, C)
             trans = self.transitions.unsqueeze(0)  # (1, C, C)
 
             # score[b, prev, next] = alpha[b, prev] + trans[prev, next] + emit[b, next]
@@ -173,7 +173,7 @@ class CRF(nn.Module):
         history = []
 
         for t in range(1, S):
-            broadcast_score = score.unsqueeze(2)           # (B, C, 1)
+            broadcast_score = score.unsqueeze(2)  # (B, C, 1)
             broadcast_trans = self.transitions.unsqueeze(0)  # (1, C, C)
 
             next_score = broadcast_score + broadcast_trans  # (B, C, C)
@@ -188,7 +188,9 @@ class CRF(nn.Module):
 
         # tambahkan end transitions sebelum argmax
         score += self.end_transitions.unsqueeze(0)
-        _, best_last_tag = score.max(dim=1)  # (B,) — correct: score frozen at last valid step
+        _, best_last_tag = score.max(
+            dim=1
+        )  # (B,) — correct: score frozen at last valid step
 
         paths = [best_last_tag]
 
@@ -307,7 +309,7 @@ class HybridModel(nn.Module):
         labels: Tensor | None = None,
     ):
         bert_out = self.bert(input_ids, attention_mask)  # (B, S_bert, 768)
-        char_out = self.char_cnn(char_ids)               # (B, S_word, 128)
+        char_out = self.char_cnn(char_ids)  # (B, S_word, 128)
 
         S_bert = bert_out.shape[1]
 
@@ -316,11 +318,11 @@ class HybridModel(nn.Module):
         )  # (B, S_bert, char_dim)
 
         # Additive fusion: project CharCNN ke bert_dim lalu tambahkan ke BERT output
-        x = bert_out + self.char_proj(char_aligned)      # (B, S_bert, bert_dim)
-        x = self.fusion_norm(F.relu(self.fusion(x)))     # (B, S_bert, fusion_dim)
+        x = bert_out + self.char_proj(char_aligned)  # (B, S_bert, bert_dim)
+        x = self.fusion_norm(F.relu(self.fusion(x)))  # (B, S_bert, fusion_dim)
         x = self.dropout(x)
 
-        emissions = self.classifier(x)   # (B, S_bert, num_classes)
+        emissions = self.classifier(x)  # (B, S_bert, num_classes)
 
         if labels is not None:
             # Align word-level labels ke subword-level (first-subword strategy).
@@ -333,7 +335,9 @@ class HybridModel(nn.Module):
             # CRF mask: posisi yang attention=1 DAN bukan ignore index
             # CRF tidak terima -100 sebagai tag index → clamp ke [0, num_tags-1]
             crf_mask = attention_mask.bool() & (aligned_labels != -100)
-            safe_labels = aligned_labels.clamp(min=0, max=self.crf.num_tags - 1)  # -100 → 0, ter-mask out di CRF
+            safe_labels = aligned_labels.clamp(
+                min=0, max=self.crf.num_tags - 1
+            )  # -100 → 0, ter-mask out di CRF
             crf_loss = self.crf(emissions, safe_labels, crf_mask)
 
             # --- CE loss ---
@@ -341,7 +345,7 @@ class HybridModel(nn.Module):
             # Flatten ke (B*S_bert,) untuk CE.
             ce_loss = self.ce_loss(
                 emissions.view(-1, emissions.shape[-1]),  # (B*S_bert, C)
-                aligned_labels.view(-1),                  # (B*S_bert,)
+                aligned_labels.view(-1),  # (B*S_bert,)
             )
 
             # Hybrid loss: CRF sebagai sinyal utama, CE mendorong minority class

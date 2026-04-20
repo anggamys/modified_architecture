@@ -3,7 +3,12 @@ import numpy as np
 import pandas as pd
 
 from torch import Tensor
-from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerBase, PreTrainedModel
+from transformers import (
+    AutoModel,
+    AutoTokenizer,
+    PreTrainedTokenizerBase,
+    PreTrainedModel,
+)
 
 from utils import log, log_level, dowloadModel
 from preprocess import prepare_char_ids

@@ -44,7 +44,9 @@ class POSDataset(Dataset):
         labels: list[int] = [self.class_to_idx.get(tag, 0) for tag in pos_tags]
 
         # CharCNN ids: (S_word, max_word_len) — word-level
-        char_ids: np.ndarray = prepare_char_ids(tokens, self.char_vocab, self.max_word_len)
+        char_ids: np.ndarray = prepare_char_ids(
+            tokens, self.char_vocab, self.max_word_len
+        )
 
         # BERT tokenisasi dengan is_split_into_words=True agar dapat word_ids()
         # Tidak ada padding di sini — padding dilakukan di collate_fn
@@ -61,11 +63,11 @@ class POSDataset(Dataset):
         word_ids: list[int | None] = encoding.word_ids(batch_index=0)
 
         return {
-            "char_ids": torch.from_numpy(char_ids),           # (S_word, W)
-            "input_ids": encoding["input_ids"].squeeze(0),    # (S_bert,)
+            "char_ids": torch.from_numpy(char_ids),  # (S_word, W)
+            "input_ids": encoding["input_ids"].squeeze(0),  # (S_bert,)
             "attention_mask": encoding["attention_mask"].squeeze(0),  # (S_bert,)
-            "word_ids": word_ids,                             # list[int | None]
-            "labels": torch.tensor(labels, dtype=torch.long), # (S_word,)
+            "word_ids": word_ids,  # list[int | None]
+            "labels": torch.tensor(labels, dtype=torch.long),  # (S_word,)
         }
 
 
@@ -94,7 +96,9 @@ def pos_collate_fn(
         labels[i, :s_word] = item["labels"]
 
         # Padding positions di word_ids diberi None agar model tahu itu bukan kata
-        padded_wids: list[int | None] = item["word_ids"] + [None] * (S_bert_max - s_bert)
+        padded_wids: list[int | None] = item["word_ids"] + [None] * (
+            S_bert_max - s_bert
+        )
         word_ids_batch.append(padded_wids)
 
     return {

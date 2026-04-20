@@ -20,7 +20,13 @@ from dataset import POSDataset, make_collate_fn
 from utils import dataInfo, log, log_level, argParser, dowloadModel
 
 
-def main(data_path: str, model_name: str, epochs: int = 10, patience: int = 3, batch_size: int = 16) -> None:
+def main(
+    data_path: str,
+    model_name: str,
+    epochs: int = 10,
+    patience: int = 3,
+    batch_size: int = 16,
+) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(f"Using device: {device}", level=log_level.INFO)
 
@@ -160,7 +166,10 @@ def main(data_path: str, model_name: str, epochs: int = 10, patience: int = 3, b
     test_acc = compute_accuracy(test_preds, test_labels)
 
     log(f"[Test] Loss     : {test_loss:.4f}", level=log_level.INFO)
-    log(f"[Test] Accuracy : {test_acc:.4f} ({test_acc * 100:.2f}%)", level=log_level.INFO)
+    log(
+        f"[Test] Accuracy : {test_acc:.4f} ({test_acc * 100:.2f}%)",
+        level=log_level.INFO,
+    )
 
     compute_classification_report(test_preds, test_labels, idx_to_class)
 
@@ -179,7 +188,10 @@ def main(data_path: str, model_name: str, epochs: int = 10, patience: int = 3, b
             indent=2,
         )
 
-    log("Vocab & class mappings disimpan: char_vocab.json, class_mappings.json", level=log_level.INFO)
+    log(
+        "Vocab & class mappings disimpan: char_vocab.json, class_mappings.json",
+        level=log_level.INFO,
+    )
 
 
 if __name__ == "__main__":
