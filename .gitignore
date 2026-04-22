@@ -4,6 +4,7 @@ models/
 article/
 markdown/
 raw_corpora/
+raw_corpora_wa/
 
 # Python built-in cache
 __pycache__/

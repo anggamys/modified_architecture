@@ -41,44 +41,70 @@ def load_corpus_from_folder(
     log(f"Ditemukan {len(txt_files)} file .txt", level=log_level.INFO)
 
     results: list[tuple[str, str]] = []
+    
+    # Regex untuk menangkap pesan WhatsApp
+    pola_chat = re.compile(r'\d{2}/\d{2}/\d{2,4}, \d{1,2}:\d{2}\u202f?[ap]m - (.*?): (.*)')
 
     for txt_file in txt_files:
         file_id = txt_file.stem  # nama file tanpa ekstensi
-        prev_count = len(results)  # snapshot sebelum file ini diproses
+        prev_count = len(results)
 
         try:
             raw = txt_file.read_text(encoding="utf-8", errors="replace")
-
         except Exception as e:
             log(f"Gagal baca {txt_file.name}: {e}", level=log_level.WARNING)
             continue
 
-        # Normalisasi line endings
         raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
 
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
+        if not lines:
+            continue
 
-            # Normalisasi teks (tanpa lowercase!)
-            line = normalize_text(clean_text(line))
+        # Auto-deteksi format WhatsApp dengan mengecek 5 baris pertama
+        is_whatsapp = any(pola_chat.match(sample_line) for sample_line in lines[:5])
 
-            # Pecah paragraf → kalimat
-            for sent in _split_sentences(line):
-                if _is_valid_sentence(sent, min_words):
-                    results.append((file_id, sent))
+        if is_whatsapp:
+            for line in lines:
+                cocok = pola_chat.match(line)
+                if cocok:
+                    pesan = cocok.group(2).strip()
 
-        # Tampilkan jumlah kalimat dari file ini saja (bukan akumulatif)
+                    # 1. Filter Pesan Sampah (Media & URL)
+                    if pesan == "<Media omitted>":
+                        continue
+                    # Ganti URL dengan token khusus
+                    pesan = re.sub(r'http[s]?://\S+', '[URL]', pesan)
+
+                    # 2. Tokenisasi Sederhana
+                    pesan = re.sub(r'([?!,.\(\)])', r' \1 ', pesan)
+
+                    # Pecah berdasarkan spasi dan buang spasi kosong
+                    tokens = [t for t in pesan.split() if t]
+
+                    # 3. Masukkan ke format untuk inference
+                    if len(tokens) >= min_words:
+                        sent = " ".join(tokens)
+                        results.append((file_id, sent))
+        else:
+            for line in lines:
+                # Normalisasi teks (tanpa lowercase!)
+                line = normalize_text(clean_text(line))
+
+                # Pecah paragraf → kalimat
+                for sent in _split_sentences(line):
+                    if _is_valid_sentence(sent, min_words):
+                        results.append((file_id, sent))
+
         file_count = len(results) - prev_count
+        tipe_file = "WhatsApp" if is_whatsapp else "Teks Standar"
         log(
-            f"  {txt_file.name}: {file_count:,} kalimat terekstrak",
+            f"  {txt_file.name} ({tipe_file}): {file_count:,} kalimat/pesan terekstrak",
             level=log_level.INFO,
         )
 
     if limit > 0:
         results = results[:limit]
-
         log(f"Dibatasi {limit} kalimat pertama", level=log_level.INFO)
 
     log(f"Total kalimat siap diinference: {len(results):,}", level=log_level.INFO)
@@ -405,6 +431,8 @@ def parse_args() -> argparse.Namespace:
         help="Folder berisi file .txt mentah",
     )
 
+
+
     parser.add_argument(
         "--model_path",
         type=str,
@@ -489,6 +517,7 @@ def main() -> None:
         min_words=args.min_words,
         limit=args.limit,
     )
+
     if not sentences:
         log("Tidak ada kalimat untuk diproses. Keluar.", level=log_level.WARNING)
         return
