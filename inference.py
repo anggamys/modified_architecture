@@ -42,8 +42,10 @@ def load_corpus_from_folder(
 
     results: list[tuple[str, str]] = []
     
-    # Regex untuk menangkap pesan WhatsApp
-    pola_chat = re.compile(r'\d{2}/\d{2}/\d{2,4}, \d{1,2}:\d{2}\u202f?[ap]m - (.*?): (.*)')
+    # Regex untuk deteksi file WhatsApp secara umum (termasuk pesan sistem)
+    pola_timestamp = re.compile(r'^\d{2}/\d{2}/\d{2,4}[, ]+\d{1,2}[:.]\d{2}(?:\s*[a-zA-Z]{2})? - ')
+    # Regex untuk menangkap pesan yang dikirim oleh pengguna (memiliki 'Nama: Pesan')
+    pola_chat = re.compile(r'^\d{2}/\d{2}/\d{2,4}[, ]+\d{1,2}[:.]\d{2}(?:\s*[a-zA-Z]{2})? - (.*?): (.*)')
 
     for txt_file in txt_files:
         file_id = txt_file.stem  # nama file tanpa ekstensi
@@ -61,8 +63,8 @@ def load_corpus_from_folder(
         if not lines:
             continue
 
-        # Auto-deteksi format WhatsApp dengan mengecek 5 baris pertama
-        is_whatsapp = any(pola_chat.match(sample_line) for sample_line in lines[:5])
+        # Auto-deteksi format WhatsApp dengan mengecek 10 baris pertama
+        is_whatsapp = any(pola_timestamp.match(sample_line) for sample_line in lines[:10])
 
         if is_whatsapp:
             for line in lines:
