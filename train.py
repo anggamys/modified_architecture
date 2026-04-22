@@ -9,7 +9,29 @@ from sklearn.metrics import classification_report
 from utils import log, log_level
 
 
-def build_optimizer(model: nn.Module) -> torch.optim.AdamW:
+def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.optim.AdamW:
+    # --- Layer Freezing: Bekukan N layer pertama IndoBERT ---
+    # Layer bawah (0-7) sudah paham bahasa Indonesia standar dari pre-training.
+    # Hanya layer atas (8-11) yang perlu belajar fitur spesifik POS tag kita.
+    # Ini mencegah overfitting pada dataset kecil (<15.000 token).
+    frozen_count = 0
+    if freeze_bert_layers > 0:
+        for name, param in model.named_parameters():
+            if 'encoder.layer' in name:
+                try:
+                    layer_num = int(name.split('encoder.layer.')[1].split('.')[0])
+                    if layer_num < freeze_bert_layers:
+                        param.requires_grad = False
+                        frozen_count += 1
+                except (IndexError, ValueError):
+                    pass
+
+        log(
+            f"Layer Freezing: {frozen_count} parameter dibekukan "
+            f"(encoder.layer 0–{freeze_bert_layers - 1})",
+            level=log_level.INFO,
+        )
+
     bert_params: list[Tensor] = []
     other_params: list[Tensor] = []
 

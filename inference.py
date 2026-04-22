@@ -15,6 +15,20 @@ from preprocess import prepare_char_ids, normalize_text, clean_text
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
+# Regex untuk memisahkan emoji dari kata yang menempel.
+# Mencakup hampir semua blok Unicode emoji yang umum digunakan.
+_POLA_EMOJI = re.compile(
+    r'('
+    r'[\U0001F600-\U0001F64F]'   # Emoticons wajah
+    r'|[\U0001F300-\U0001F5FF]'  # Simbol rupa-rupa & Piktograf
+    r'|[\U0001F680-\U0001F6FF]'  # Transportasi & Peta
+    r'|[\U0001F900-\U0001F9FF]'  # Simbol & Piktograf Tambahan
+    r'|[\U0001FA70-\U0001FAFF]'  # Simbol Baru (Medis, Alam, dll)
+    r'|[\u2600-\u26FF]'          # Simbol Miscellaneous (matahari, awan, dll)
+    r'|[\u2700-\u27BF]'          # Dingbats (tanda centang, gunting, dll)
+    r')', flags=re.UNICODE
+)
+
 
 def _split_sentences(paragraph: str) -> list[str]:
     parts = _SENT_SPLIT.split(paragraph.strip())
@@ -78,7 +92,11 @@ def load_corpus_from_folder(
                     # Ganti URL dengan token khusus
                     pesan = re.sub(r'http[s]?://\S+', '[URL]', pesan)
 
-                    # 2. Tokenisasi Sederhana
+                    # 2. Pisahkan emoji dengan spasi agar tidak menempel ke kata
+                    #    Contoh: "maaf🙏ya" → "maaf 🙏 ya"
+                    pesan = _POLA_EMOJI.sub(r' \1 ', pesan)
+
+                    # 3. Tokenisasi Sederhana (pisahkan tanda baca umum)
                     pesan = re.sub(r'([?!,.\(\)])', r' \1 ', pesan)
 
                     # Pecah berdasarkan spasi dan buang spasi kosong
