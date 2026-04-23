@@ -33,6 +33,7 @@ def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.opti
         )
 
     bert_params: list[Tensor] = []
+    crf_params: list[Tensor] = []
     other_params: list[Tensor] = []
 
     for name, param in model.named_parameters():
@@ -40,20 +41,24 @@ def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.opti
             continue
         if "bert" in name:
             bert_params.append(param)
+        elif "crf" in name:
+            crf_params.append(param)
         else:
             other_params.append(param)
 
     optimizer = torch.optim.AdamW(
         [
             {"params": bert_params, "lr": 2e-5},
-            {"params": other_params, "lr": 5e-4},
+            {"params": other_params, "lr": 1e-3},
+            {"params": crf_params, "lr": 5e-3},  # CRF belajar lebih agresif
         ],
         weight_decay=0.01,  # standard untuk BERT fine-tuning
     )
 
     log(
         f"Optimizer: {len(bert_params)} BERT params (lr=2e-5) | "
-        f"{len(other_params)} other params (lr=1e-3)",
+        f"{len(other_params)} other params (lr=1e-3) | "
+        f"{len(crf_params)} CRF params (lr=5e-3)",
         level=log_level.INFO,
     )
 

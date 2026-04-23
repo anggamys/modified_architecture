@@ -72,10 +72,10 @@ class CharBiLSTM(nn.Module):
     def __init__(
         self,
         vocab_size: int,
-        emb_dim: int = 32,
-        hidden_dim: int = 64,  # per arah; output = hidden_dim * 2
+        emb_dim: int = 64,       # Ditingkatkan dari 32
+        hidden_dim: int = 128,   # Ditingkatkan dari 64
         output_dim: int = 128,
-        dropout: float = 0.35,
+        dropout: float = 0.3,    # Disesuaikan dari 0.35
     ) -> None:
         super().__init__()
 
@@ -87,9 +87,10 @@ class CharBiLSTM(nn.Module):
         self.bilstm = nn.LSTM(
             input_size=emb_dim,
             hidden_size=hidden_dim,
-            num_layers=1,
+            num_layers=2,            # Ditingkatkan ke Deep BiLSTM (dari 1)
             batch_first=True,
             bidirectional=True,
+            dropout=0.3              # Ditambahkan karena num_layers > 1
         )
 
         # Project hidden_dim*2 → output_dim agar dimensi sama dengan CharCNN
@@ -416,8 +417,11 @@ class HybridModel(nn.Module):
                     emissions.view(-1, emissions.shape[-1]),
                     aligned_labels.view(-1),
                 )
-                # Hybrid loss: CRF sebagai sinyal utama, CE mendorong minority class
-                return crf_loss + 0.5 * ce_loss
+                # Hybrid loss dengan pembobotan (alpha)
+                # alpha = 0.7 berarti 70% fokus ke CRF (tata bahasa/urutan), 
+                # 30% ke CE (mendorong kelas minoritas)
+                alpha = 0.7
+                return (alpha * crf_loss) + ((1 - alpha) * ce_loss)
             else:
                 # Baseline: CE murni (IndoBERT + Linear)
                 return self.ce_loss(
