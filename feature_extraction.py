@@ -61,26 +61,74 @@ class CharCNN(nn.Module):
         return x.reshape(B, S, -1)
 
 
+class CharBiLSTM(nn.Module):
+    """
+    Char-level BiLSTM: membaca urutan huruf dari kiri ke kanan dan sebaliknya,
+    lalu menggabungkan hidden state terakhir dari dua arah sebagai representasi kata.
+    Lebih kuat dari Char-CNN untuk menangkap imbuhan jauh (di- ... -in), tapi lebih lambat.
+    Digunakan pada skenario ablasi M5.
+    """
+
+    def __init__(
+        self,
+        vocab_size: int,
+        emb_dim: int = 32,
+        hidden_dim: int = 64,  # per arah; output = hidden_dim * 2
+        output_dim: int = 128,
+        dropout: float = 0.35,
+    ) -> None:
+        super().__init__()
+
+        self.output_dim = output_dim  # sama dengan CharCNN agar kompatibel di fusion
+
+        self.char_emb = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
+        self.embed_dropout = nn.Dropout(0.15)
+
+        self.bilstm = nn.LSTM(
+            input_size=emb_dim,
+            hidden_size=hidden_dim,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=True,
+        )
+
+        # Project hidden_dim*2 → output_dim agar dimensi sama dengan CharCNN
+        self.proj = nn.Linear(hidden_dim * 2, output_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, char_ids: Tensor) -> Tensor:
+        B, S, W = char_ids.shape
+
+        x = char_ids.reshape(-1, W)  # (B*S, W)
+        x = self.char_emb(x)  # (B*S, W, emb_dim)
+        x = self.embed_dropout(x)
+
+        # Hitung panjang nyata tiap kata (jumlah karakter non-padding)
+        lengths = (char_ids.reshape(-1, W) != 0).sum(dim=1).clamp(min=1)  # (B*S,)
+
+        # pack agar LSTM tidak memproses padding
+        packed = nn.utils.rnn.pack_padded_sequence(
+            x, lengths.cpu(), batch_first=True, enforce_sorted=False
+        )
+        _, (h_n, _) = self.bilstm(packed)  # h_n: (2, B*S, hidden_dim)
+
+        # Gabungkan hidden state forward dan backward
+        h = torch.cat([h_n[0], h_n[1]], dim=1)  # (B*S, hidden_dim*2)
+        h = self.proj(h)  # (B*S, output_dim)
+        h = self.dropout(h)
+
+        return h.reshape(B, S, -1)  # (B, S, output_dim)
+
+
 class Bert(nn.Module):
     def __init__(
         self,
         bert: PreTrainedModel,
         dropout: float = 0.1,
-        freeze_bert: bool = True,
     ) -> None:
         super().__init__()
 
         self.bert = bert
-
-        if freeze_bert:
-            for param in self.bert.parameters():
-                param.requires_grad = False
-
-        # unfreeze 4 layer terakhir (8–11) untuk adaptasi lebih baik di dataset kecil
-        for name, param in self.bert.named_parameters():
-            if any(f"encoder.layer.{i}" in name for i in range(8, 12)):
-                param.requires_grad = True
-
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, input_ids: Tensor, attention_mask: Tensor) -> Tensor:
@@ -216,6 +264,23 @@ class CRF(nn.Module):
 
 
 class HybridModel(nn.Module):
+    """
+    Model hibrida dengan flag ablation untuk Ablation Study.
+    Mendukung semua skenario berikut melalui argumen CLI:
+
+      Skenario | word_model  | char_type | use_crf | Keterangan
+      ---------|-------------|-----------|---------|------------------------------------
+        M1     | bert        | none      | False   | Baseline: IndoBERT + Linear
+        M2     | bert        | none      | True    | Ablasi: IndoBERT + CRF
+        M3     | bert        | cnn       | True    | *) Lihat catatan M3 di bawah
+        M4     | bert        | cnn       | True    | Proposed: IndoBERT + Char-CNN + CRF
+        M5     | bert        | bilstm    | True    | Eksperimen: IndoBERT + Char-BiLSTM + CRF
+        M6     | bert        | cnn       | True    | Sama M4, ganti --model_name IndoBERTweet
+
+    *) M3 (Word-BiLSTM) membutuhkan pipeline data berbeda (word-level vocab),
+       belum terintegrasi; jalankan dengan arsitektur terpisah.
+    """
+
     def __init__(
         self,
         char_vocab_size: int,
@@ -223,30 +288,42 @@ class HybridModel(nn.Module):
         num_classes: int,
         class_weights: Tensor | None = None,
         fusion_dim: int = 256,
+        char_type: str = "cnn",  # "none" | "cnn" | "bilstm"
+        use_crf: bool = True,
     ) -> None:
         super().__init__()
 
+        if char_type not in ("none", "cnn", "bilstm"):
+            raise ValueError(
+                f"char_type harus 'none', 'cnn', atau 'bilstm'. Dapat: {char_type!r}"
+            )
+
+        self.char_type = char_type
+        self.use_crf = use_crf
+
         # encoder
-        self.char_cnn = CharCNN(vocab_size=char_vocab_size)
         self.bert = Bert(bert)
-
-        # ambil dimensi dinamis
         bert_dim = self.bert.bert.config.hidden_size
-        char_dim = self.char_cnn.output_dim
 
-        # CharCNN projection: angkat char_dim ke bert_dim agar bisa additive fusion
-        self.char_proj = nn.Linear(char_dim, bert_dim)
+        if char_type == "cnn":
+            self.char_extractor: nn.Module = CharCNN(vocab_size=char_vocab_size)
+            char_dim = self.char_extractor.output_dim
+            self.char_proj = nn.Linear(char_dim, bert_dim)
+        elif char_type == "bilstm":
+            self.char_extractor = CharBiLSTM(vocab_size=char_vocab_size)
+            char_dim = self.char_extractor.output_dim
+            self.char_proj = nn.Linear(char_dim, bert_dim)
 
-        # fusion: input bert_dim (setelah additive), bukan bert_dim + char_dim
+        # fusion
         self.fusion = nn.Linear(bert_dim, fusion_dim)
         self.fusion_norm = nn.LayerNorm(fusion_dim)
         self.dropout = nn.Dropout(0.15)
 
-        # classifier
+        # classifier head
         self.classifier = nn.Linear(fusion_dim, num_classes)
 
-        # CRF
-        self.crf = CRF(num_classes)
+        if use_crf:
+            self.crf = CRF(num_classes)
 
         # CE loss dengan class weighting untuk handle imbalance.
         # ignore_index=-100 otomatis mengecualikan non-first subword & special tokens.
@@ -265,15 +342,14 @@ class HybridModel(nn.Module):
         aligned = char_out.new_zeros(B, S_bert, char_dim)
 
         for b, word_ids in enumerate(word_ids_batch):
-            # Konversi ke tensor: None → -1 (invalid), int → word index
             wids = torch.tensor(
                 [-1 if w is None else w for w in word_ids[:S_bert]],
                 device=char_out.device,
                 dtype=torch.long,
             )  # (S_bert,)
 
-            valid = (wids >= 0) & (wids < S_word)  # mask posisi yang punya word asli
-            aligned[b, valid] = char_out[b][wids[valid]]  # tensor gather, satu operasi
+            valid = (wids >= 0) & (wids < S_word)
+            aligned[b, valid] = char_out[b][wids[valid]]
 
         return aligned
 
@@ -309,49 +385,50 @@ class HybridModel(nn.Module):
         labels: Tensor | None = None,
     ):
         bert_out = self.bert(input_ids, attention_mask)  # (B, S_bert, 768)
-        char_out = self.char_cnn(char_ids)  # (B, S_word, 128)
-
         S_bert = bert_out.shape[1]
 
-        char_aligned = self._align_char_to_bert(
-            char_out, word_ids, S_bert=S_bert
-        )  # (B, S_bert, char_dim)
+        if self.char_type != "none":
+            char_out = self.char_extractor(char_ids)  # (B, S_word, char_dim)
+            char_aligned = self._align_char_to_bert(char_out, word_ids, S_bert)
+            # Additive fusion: project char ke bert_dim lalu tambahkan
+            x = bert_out + self.char_proj(char_aligned)
+        else:
+            x = bert_out  # baseline M1/M2: BERT saja tanpa fitur karakter
 
-        # Additive fusion: project CharCNN ke bert_dim lalu tambahkan ke BERT output
-        x = bert_out + self.char_proj(char_aligned)  # (B, S_bert, bert_dim)
         x = self.fusion_norm(F.relu(self.fusion(x)))  # (B, S_bert, fusion_dim)
         x = self.dropout(x)
 
         emissions = self.classifier(x)  # (B, S_bert, num_classes)
 
         if labels is not None:
-            # Align word-level labels ke subword-level (first-subword strategy).
-            # Non-first subwords dan special tokens mendapat -100 (ignore index).
             aligned_labels = self._align_labels_to_bert(
                 labels, word_ids, S_bert=S_bert
             )  # (B, S_bert)
 
-            # --- CRF loss ---
-            # CRF mask: posisi yang attention=1 DAN bukan ignore index
-            # CRF tidak terima -100 sebagai tag index → clamp ke [0, num_tags-1]
-            crf_mask = attention_mask.bool() & (aligned_labels != -100)
-            safe_labels = aligned_labels.clamp(
-                min=0, max=self.crf.num_tags - 1
-            )  # -100 → 0, ter-mask out di CRF
-            crf_loss = self.crf(emissions, safe_labels, crf_mask)
+            if self.use_crf:
+                # --- CRF Loss ---
+                crf_mask = attention_mask.bool() & (aligned_labels != -100)
+                safe_labels = aligned_labels.clamp(min=0, max=self.crf.num_tags - 1)
+                crf_loss = self.crf(emissions, safe_labels, crf_mask)
 
-            # --- CE loss ---
-            # CrossEntropyLoss(ignore_index=-100) menangani masking sendiri.
-            # Flatten ke (B*S_bert,) untuk CE.
-            ce_loss = self.ce_loss(
-                emissions.view(-1, emissions.shape[-1]),  # (B*S_bert, C)
-                aligned_labels.view(-1),  # (B*S_bert,)
-            )
-
-            # Hybrid loss: CRF sebagai sinyal utama, CE mendorong minority class
-            return crf_loss + 0.5 * ce_loss
+                # --- CE Loss (auxiliary) ---
+                ce_loss = self.ce_loss(
+                    emissions.view(-1, emissions.shape[-1]),
+                    aligned_labels.view(-1),
+                )
+                # Hybrid loss: CRF sebagai sinyal utama, CE mendorong minority class
+                return crf_loss + 0.5 * ce_loss
+            else:
+                # Baseline: CE murni (IndoBERT + Linear)
+                return self.ce_loss(
+                    emissions.view(-1, emissions.shape[-1]),
+                    aligned_labels.view(-1),
+                )
 
         else:
-            crf_mask = attention_mask.bool()
-            preds = self.crf.decode(emissions, mask=crf_mask)
-            return preds
+            if self.use_crf:
+                crf_mask = attention_mask.bool()
+                return self.crf.decode(emissions, mask=crf_mask)  # (B, S_bert)
+            else:
+                # Argmax decode
+                return emissions.argmax(dim=-1)  # (B, S_bert)

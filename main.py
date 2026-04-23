@@ -14,10 +14,10 @@ from preprocess import (
     create_torch_weight_tensor,
 )
 
-from train import train_model, evaluate, compute_accuracy, compute_classification_report
 from feature_extraction import HybridModel
 from dataset import POSDataset, make_collate_fn
 from utils import dataInfo, log, log_level, argParser, dowloadModel
+from train import train_model, evaluate, compute_accuracy, compute_classification_report
 
 
 def main(
@@ -26,9 +26,16 @@ def main(
     epochs: int = 10,
     patience: int = 3,
     batch_size: int = 16,
+    char_type: str = "cnn",
+    use_crf: bool = True,
 ) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(f"Using device: {device}", level=log_level.INFO)
+
+    # Log konfigurasi ablation yang aktif
+    char_label = {"none": "(none)", "cnn": "Char-CNN", "bilstm": "Char-BiLSTM"}.get(char_type, char_type)
+    ablation_name = f"IndoBERT + {char_label} + {'CRF' if use_crf else 'Linear'}"
+    log(f"Konfigurasi Ablation: [{ablation_name}]", level=log_level.INFO)
 
     sample_data = pd.read_csv(data_path)
     dataInfo(sample_data)
@@ -100,6 +107,8 @@ def main(
         bert=bert_model,
         num_classes=num_classes,
         class_weights=class_weights,
+        char_type=char_type,
+        use_crf=use_crf,
     ).to(device)
 
     log(
@@ -233,6 +242,20 @@ if __name__ == "__main__":
                 "help": "DataLoader batch size.",
                 "required": False,
             },
+            {
+                "flag": "--char_type",
+                "type": str,
+                "default": "cnn",
+                "help": "Tipe char extractor: 'none' (M1/M2), 'cnn' (M4/M6, default), 'bilstm' (M5).",
+                "required": False,
+            },
+            {
+                "flag": "--use_crf",
+                "type": bool,
+                "default": True,
+                "help": "Aktifkan CRF decoder (False = baseline Linear/Softmax murni).",
+                "required": False,
+            },
         ],
     ).parse_args()
 
@@ -242,4 +265,6 @@ if __name__ == "__main__":
         epochs=args.epochs,
         patience=args.patience,
         batch_size=args.batch_size,
+        char_type=args.char_type,
+        use_crf=args.use_crf,
     )

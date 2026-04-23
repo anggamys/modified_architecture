@@ -12,9 +12,6 @@ from utils import log, log_level
 
 
 def normalize_text(text: str) -> str:
-    # CATATAN: Sengaja TIDAK dilakukan lowercase.
-    # Huruf kapital adalah sinyal utama N-NDR (Proper Noun).
-    # "Jakarta" vs "jakarta" berbeda representasinya di IndoBERT & CharCNN.
     text = str(text)
 
     # Unify quotes

@@ -18,15 +18,16 @@ _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 # Regex untuk memisahkan emoji dari kata yang menempel.
 # Mencakup hampir semua blok Unicode emoji yang umum digunakan.
 _POLA_EMOJI = re.compile(
-    r'('
-    r'[\U0001F600-\U0001F64F]'   # Emoticons wajah
-    r'|[\U0001F300-\U0001F5FF]'  # Simbol rupa-rupa & Piktograf
-    r'|[\U0001F680-\U0001F6FF]'  # Transportasi & Peta
-    r'|[\U0001F900-\U0001F9FF]'  # Simbol & Piktograf Tambahan
-    r'|[\U0001FA70-\U0001FAFF]'  # Simbol Baru (Medis, Alam, dll)
-    r'|[\u2600-\u26FF]'          # Simbol Miscellaneous (matahari, awan, dll)
-    r'|[\u2700-\u27BF]'          # Dingbats (tanda centang, gunting, dll)
-    r')', flags=re.UNICODE
+    r"("
+    r"[\U0001F600-\U0001F64F]"  # Emoticons wajah
+    r"|[\U0001F300-\U0001F5FF]"  # Simbol rupa-rupa & Piktograf
+    r"|[\U0001F680-\U0001F6FF]"  # Transportasi & Peta
+    r"|[\U0001F900-\U0001F9FF]"  # Simbol & Piktograf Tambahan
+    r"|[\U0001FA70-\U0001FAFF]"  # Simbol Baru (Medis, Alam, dll)
+    r"|[\u2600-\u26FF]"  # Simbol Miscellaneous (matahari, awan, dll)
+    r"|[\u2700-\u27BF]"  # Dingbats (tanda centang, gunting, dll)
+    r")",
+    flags=re.UNICODE,
 )
 
 
@@ -55,11 +56,15 @@ def load_corpus_from_folder(
     log(f"Ditemukan {len(txt_files)} file .txt", level=log_level.INFO)
 
     results: list[tuple[str, str]] = []
-    
+
     # Regex untuk deteksi file WhatsApp secara umum (termasuk pesan sistem)
-    pola_timestamp = re.compile(r'^\d{2}/\d{2}/\d{2,4}[, ]+\d{1,2}[:.]\d{2}(?:\s*[a-zA-Z]{2})? - ')
+    pola_timestamp = re.compile(
+        r"^\d{2}/\d{2}/\d{2,4}[, ]+\d{1,2}[:.]\d{2}(?:\s*[a-zA-Z]{2})? - "
+    )
     # Regex untuk menangkap pesan yang dikirim oleh pengguna (memiliki 'Nama: Pesan')
-    pola_chat = re.compile(r'^\d{2}/\d{2}/\d{2,4}[, ]+\d{1,2}[:.]\d{2}(?:\s*[a-zA-Z]{2})? - (.*?): (.*)')
+    pola_chat = re.compile(
+        r"^\d{2}/\d{2}/\d{2,4}[, ]+\d{1,2}[:.]\d{2}(?:\s*[a-zA-Z]{2})? - (.*?): (.*)"
+    )
 
     for txt_file in txt_files:
         file_id = txt_file.stem  # nama file tanpa ekstensi
@@ -78,7 +83,9 @@ def load_corpus_from_folder(
             continue
 
         # Auto-deteksi format WhatsApp dengan mengecek 10 baris pertama
-        is_whatsapp = any(pola_timestamp.match(sample_line) for sample_line in lines[:10])
+        is_whatsapp = any(
+            pola_timestamp.match(sample_line) for sample_line in lines[:10]
+        )
 
         if is_whatsapp:
             for line in lines:
@@ -90,14 +97,14 @@ def load_corpus_from_folder(
                     if pesan == "<Media omitted>":
                         continue
                     # Ganti URL dengan token khusus
-                    pesan = re.sub(r'http[s]?://\S+', '[URL]', pesan)
+                    pesan = re.sub(r"http[s]?://\S+", "[URL]", pesan)
 
                     # 2. Pisahkan emoji dengan spasi agar tidak menempel ke kata
                     #    Contoh: "maaf🙏ya" → "maaf 🙏 ya"
-                    pesan = _POLA_EMOJI.sub(r' \1 ', pesan)
+                    pesan = _POLA_EMOJI.sub(r" \1 ", pesan)
 
                     # 3. Tokenisasi Sederhana (pisahkan tanda baca umum)
-                    pesan = re.sub(r'([?!,.\(\)])', r' \1 ', pesan)
+                    pesan = re.sub(r"([?!,.\(\)])", r" \1 ", pesan)
 
                     # Pecah berdasarkan spasi dan buang spasi kosong
                     tokens = [t for t in pesan.split() if t]
@@ -450,8 +457,6 @@ def parse_args() -> argparse.Namespace:
         default="./raw_corpora",
         help="Folder berisi file .txt mentah",
     )
-
-
 
     parser.add_argument(
         "--model_path",
