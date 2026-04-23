@@ -333,49 +333,36 @@ class HybridModel(nn.Module):
             ignore_index=-100,
         )
 
-    def _align_char_to_bert(
+    def _pool_bert_to_word(
         self,
-        char_out: Tensor,
+        bert_out: Tensor,
         word_ids_batch: list[list[int | None]],
-        S_bert: int,
+        S_word: int,
     ) -> Tensor:
-        B, S_word, char_dim = char_out.shape
-        aligned = char_out.new_zeros(B, S_bert, char_dim)
+        B, S_bert, bert_dim = bert_out.shape
+        pooled = bert_out.new_zeros(B, S_word, bert_dim)
 
         for b, word_ids in enumerate(word_ids_batch):
             wids = torch.tensor(
                 [-1 if w is None else w for w in word_ids[:S_bert]],
-                device=char_out.device,
+                device=bert_out.device,
                 dtype=torch.long,
-            )  # (S_bert,)
+            )
 
             valid = (wids >= 0) & (wids < S_word)
-            aligned[b, valid] = char_out[b][wids[valid]]
+            valid_wids = wids[valid]
 
-        return aligned
+            if valid_wids.numel() > 0:
+                # Tambahkan semua vektor BERT untuk id kata yang sama
+                pooled[b].index_add_(0, valid_wids, bert_out[b, valid])
+                
+                # Hitung kemunculan (jumlah subword per kata) untuk average pooling
+                counts = torch.bincount(valid_wids, minlength=S_word)
+                counts = counts[:S_word].unsqueeze(1).clamp(min=1)
+                
+                pooled[b] = pooled[b] / counts
 
-    def _align_labels_to_bert(
-        self,
-        labels: Tensor,
-        word_ids_batch: list[list[int | None]],
-        S_bert: int,
-    ) -> Tensor:
-        B = labels.shape[0]
-        aligned = labels.new_full((B, S_bert), -100)  # default: ignore
-
-        for b, word_ids in enumerate(word_ids_batch):
-            prev_word: int | None = None
-            for t, word_id in enumerate(word_ids):
-                if t >= S_bert:
-                    break
-                if word_id is None:
-                    continue  # special token → tetap -100
-                if word_id != prev_word:  # first subword dari kata ini
-                    if word_id < labels.shape[1]:
-                        aligned[b, t] = labels[b, word_id]
-                prev_word = word_id
-
-        return aligned
+        return pooled
 
     def forward(
         self,
@@ -383,56 +370,55 @@ class HybridModel(nn.Module):
         input_ids: Tensor,
         attention_mask: Tensor,
         word_ids: list[list[int | None]],
+        word_mask: Tensor | None = None,
         labels: Tensor | None = None,
     ):
         bert_out = self.bert(input_ids, attention_mask)  # (B, S_bert, 768)
-        S_bert = bert_out.shape[1]
+        B, S_word, char_dim = char_ids.shape[:3]
 
+        # 1. Subword Average Pooling: (B, S_bert, 768) -> (B, S_word, 768)
+        bert_pooled = self._pool_bert_to_word(bert_out, word_ids, S_word)
+
+        # 2. Additive Fusion langsung pada level kata (S_word)
         if self.char_type != "none":
             char_out = self.char_extractor(char_ids)  # (B, S_word, char_dim)
-            char_aligned = self._align_char_to_bert(char_out, word_ids, S_bert)
-            # Additive fusion: project char ke bert_dim lalu tambahkan
-            x = bert_out + self.char_proj(char_aligned)
+            x = bert_pooled + self.char_proj(char_out)
         else:
-            x = bert_out  # baseline M1/M2: BERT saja tanpa fitur karakter
+            x = bert_pooled  # baseline M1/M2: BERT saja tanpa fitur karakter
 
-        x = self.fusion_norm(F.relu(self.fusion(x)))  # (B, S_bert, fusion_dim)
+        x = self.fusion_norm(F.relu(self.fusion(x)))  # (B, S_word, fusion_dim)
         x = self.dropout(x)
 
-        emissions = self.classifier(x)  # (B, S_bert, num_classes)
+        emissions = self.classifier(x)  # (B, S_word, num_classes)
+
+        # Jika word_mask tidak diberikan (saat inference di luar train/val), buat sendiri
+        if word_mask is None:
+            word_mask = (char_ids.sum(dim=-1) > 0)
 
         if labels is not None:
-            aligned_labels = self._align_labels_to_bert(
-                labels, word_ids, S_bert=S_bert
-            )  # (B, S_bert)
-
             if self.use_crf:
-                # --- CRF Loss ---
-                crf_mask = attention_mask.bool() & (aligned_labels != -100)
-                safe_labels = aligned_labels.clamp(min=0, max=self.crf.num_tags - 1)
-                crf_loss = self.crf(emissions, safe_labels, crf_mask)
+                # --- CRF Loss (pada level kata) ---
+                safe_labels = labels.clamp(min=0, max=self.crf.num_tags - 1)
+                crf_loss = self.crf(emissions, safe_labels, word_mask)
 
                 # --- CE Loss (auxiliary) ---
-                ce_loss = self.ce_loss(
-                    emissions.view(-1, emissions.shape[-1]),
-                    aligned_labels.view(-1),
-                )
+                active_loss = word_mask.view(-1)
+                active_logits = emissions.view(-1, self.crf.num_tags)[active_loss]
+                active_labels = labels.view(-1)[active_loss]
+                ce_loss = self.ce_loss(active_logits, active_labels)
+
                 # Hybrid loss dengan pembobotan (alpha)
-                # alpha = 0.7 berarti 70% fokus ke CRF (tata bahasa/urutan), 
-                # 30% ke CE (mendorong kelas minoritas)
                 alpha = 0.7
                 return (alpha * crf_loss) + ((1 - alpha) * ce_loss)
             else:
                 # Baseline: CE murni (IndoBERT + Linear)
-                return self.ce_loss(
-                    emissions.view(-1, emissions.shape[-1]),
-                    aligned_labels.view(-1),
-                )
+                active_loss = word_mask.view(-1)
+                active_logits = emissions.view(-1, self.crf.num_tags)[active_loss]
+                active_labels = labels.view(-1)[active_loss]
+                return self.ce_loss(active_logits, active_labels)
 
         else:
             if self.use_crf:
-                crf_mask = attention_mask.bool()
-                return self.crf.decode(emissions, mask=crf_mask)  # (B, S_bert)
+                return self.crf.decode(emissions, mask=word_mask)  # (B, S_word)
             else:
-                # Argmax decode
-                return emissions.argmax(dim=-1)  # (B, S_bert)
+                return emissions.argmax(dim=-1)  # (B, S_word)

@@ -11,9 +11,6 @@ from utils import log, log_level
 
 def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.optim.AdamW:
     # --- Layer Freezing: Bekukan N layer pertama IndoBERT ---
-    # Layer bawah (0-7) sudah paham bahasa Indonesia standar dari pre-training.
-    # Hanya layer atas (8-11) yang perlu belajar fitur spesifik POS tag kita.
-    # Ini mencegah overfitting pada dataset kecil (<15.000 token).
     frozen_count = 0
     if freeze_bert_layers > 0:
         for name, param in model.named_parameters():
@@ -32,31 +29,39 @@ def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.opti
             level=log_level.INFO,
         )
 
-    bert_params: list[Tensor] = []
-    crf_params: list[Tensor] = []
-    other_params: list[Tensor] = []
+    param_groups = []
+    other_params = []
+    crf_params = []
 
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
+            
         if "bert" in name:
-            bert_params.append(param)
+            if "encoder.layer" in name:
+                try:
+                    layer_num = int(name.split("encoder.layer.")[1].split(".")[0])
+                    # LLRD: Base LR 5e-5 untuk layer 11, turun perlahan ke bawah
+                    lr = 5e-5 - (11 - layer_num) * 0.5e-5
+                    param_groups.append({"params": [param], "lr": lr})
+                except (IndexError, ValueError):
+                    param_groups.append({"params": [param], "lr": 2e-5})
+            else:
+                # Embeddings, pooler
+                param_groups.append({"params": [param], "lr": 1e-5})
         elif "crf" in name:
             crf_params.append(param)
         else:
             other_params.append(param)
 
-    optimizer = torch.optim.AdamW(
-        [
-            {"params": bert_params, "lr": 2e-5},
-            {"params": other_params, "lr": 1e-3},
-            {"params": crf_params, "lr": 5e-3},  # CRF belajar lebih agresif
-        ],
-        weight_decay=0.01,  # standard untuk BERT fine-tuning
-    )
+    # Tambahkan layer luar dengan LR lebih agresif
+    param_groups.append({"params": other_params, "lr": 1e-3})
+    param_groups.append({"params": crf_params, "lr": 5e-3})
+
+    optimizer = torch.optim.AdamW(param_groups, weight_decay=0.01)
 
     log(
-        f"Optimizer: {len(bert_params)} BERT params (lr=2e-5) | "
+        f"Optimizer: Layer-wise Learning Rate Decay aktif | "
         f"{len(other_params)} other params (lr=1e-3) | "
         f"{len(crf_params)} CRF params (lr=5e-3)",
         level=log_level.INFO,
@@ -129,8 +134,9 @@ def train_one_epoch(
         char_ids: Tensor = batch["char_ids"].to(device)
         input_ids: Tensor = batch["input_ids"].to(device)
         attention_mask: Tensor = batch["attention_mask"].to(device)
+        word_mask: Tensor = batch["word_mask"].to(device)
         labels: Tensor = batch["labels"].to(device)
-        word_ids: list[list[int | None]] = batch["word_ids"]  # list, jangan .to()
+        word_ids: list[list[int | None]] = batch["word_ids"]
 
         optimizer.zero_grad()
 
@@ -139,6 +145,7 @@ def train_one_epoch(
             input_ids=input_ids,
             attention_mask=attention_mask,
             word_ids=word_ids,
+            word_mask=word_mask,
             labels=labels,
         )
 
@@ -170,6 +177,7 @@ def evaluate(
             char_ids: Tensor = batch["char_ids"].to(device)
             input_ids: Tensor = batch["input_ids"].to(device)
             attention_mask: Tensor = batch["attention_mask"].to(device)
+            word_mask: Tensor = batch["word_mask"].to(device)
             labels: Tensor = batch["labels"].to(device)
             word_ids: list[list[int | None]] = batch["word_ids"]
 
@@ -179,6 +187,7 @@ def evaluate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 word_ids=word_ids,
+                word_mask=word_mask,
                 labels=labels,
             )
 
@@ -188,23 +197,19 @@ def evaluate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 word_ids=word_ids,
+                word_mask=word_mask,
                 labels=None,
             )
 
             total_loss += loss.item()
 
-            # Kumpulkan preds & labels hanya di posisi valid (first-subword)
-            # Gunakan word_ids untuk filter: ambil posisi first-subword per kalimat
-            for b, wids in enumerate(word_ids):
-                prev_word: int | None = None
-                for t, word_id in enumerate(wids):
-                    if word_id is None:
-                        continue
-                    if word_id != prev_word:
-                        # first-subword: ambil pred & label di posisi t
-                        all_preds.append(preds[b, t].item())
-                        all_labels.append(labels[b, word_id].item())
-                    prev_word = word_id
+            # Kumpulkan preds & labels hanya di posisi kata yang valid
+            B, S_word = labels.shape
+            for b in range(B):
+                for w in range(S_word):
+                    if word_mask[b, w]:
+                        all_preds.append(preds[b, w].item())
+                        all_labels.append(labels[b, w].item())
 
     avg_loss = total_loss / len(dataloader)
     return avg_loss, all_preds, all_labels

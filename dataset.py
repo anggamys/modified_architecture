@@ -83,6 +83,7 @@ def pos_collate_fn(
     char_ids = torch.zeros(B, S_word_max, W, dtype=torch.long)
     input_ids = torch.full((B, S_bert_max), pad_token_id, dtype=torch.long)
     attention_mask = torch.zeros(B, S_bert_max, dtype=torch.long)
+    word_mask = torch.zeros(B, S_word_max, dtype=torch.bool)
     labels = torch.zeros(B, S_word_max, dtype=torch.long)
     word_ids_batch: list[list[int | None]] = []
 
@@ -93,6 +94,7 @@ def pos_collate_fn(
         char_ids[i, :s_word] = item["char_ids"]
         input_ids[i, :s_bert] = item["input_ids"]
         attention_mask[i, :s_bert] = item["attention_mask"]
+        word_mask[i, :s_word] = True
         labels[i, :s_word] = item["labels"]
 
         # Padding positions di word_ids diberi None agar model tahu itu bukan kata
@@ -105,6 +107,7 @@ def pos_collate_fn(
         "char_ids": char_ids,
         "input_ids": input_ids,
         "attention_mask": attention_mask,
+        "word_mask": word_mask,
         "word_ids": word_ids_batch,
         "labels": labels,
     }
