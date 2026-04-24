@@ -72,10 +72,10 @@ class CharBiLSTM(nn.Module):
     def __init__(
         self,
         vocab_size: int,
-        emb_dim: int = 64,       # Ditingkatkan dari 32
-        hidden_dim: int = 128,   # Ditingkatkan dari 64
+        emb_dim: int = 64,  # Ditingkatkan dari 32
+        hidden_dim: int = 128,  # Ditingkatkan dari 64
         output_dim: int = 128,
-        dropout: float = 0.3,    # Disesuaikan dari 0.35
+        dropout: float = 0.3,  # Disesuaikan dari 0.35
     ) -> None:
         super().__init__()
 
@@ -87,10 +87,10 @@ class CharBiLSTM(nn.Module):
         self.bilstm = nn.LSTM(
             input_size=emb_dim,
             hidden_size=hidden_dim,
-            num_layers=2,            # Ditingkatkan ke Deep BiLSTM (dari 1)
+            num_layers=2,  # Ditingkatkan ke Deep BiLSTM (dari 1)
             batch_first=True,
             bidirectional=True,
-            dropout=0.3              # Ditambahkan karena num_layers > 1
+            dropout=0.3,  # Ditambahkan karena num_layers > 1
         )
 
         # Project hidden_dim*2 → output_dim agar dimensi sama dengan CharCNN
@@ -355,11 +355,11 @@ class HybridModel(nn.Module):
             if valid_wids.numel() > 0:
                 # Tambahkan semua vektor BERT untuk id kata yang sama
                 pooled[b].index_add_(0, valid_wids, bert_out[b, valid])
-                
+
                 # Hitung kemunculan (jumlah subword per kata) untuk average pooling
                 counts = torch.bincount(valid_wids, minlength=S_word)
                 counts = counts[:S_word].unsqueeze(1).clamp(min=1)
-                
+
                 pooled[b] = pooled[b] / counts
 
         return pooled
@@ -393,7 +393,7 @@ class HybridModel(nn.Module):
 
         # Jika word_mask tidak diberikan (saat inference di luar train/val), buat sendiri
         if word_mask is None:
-            word_mask = (char_ids.sum(dim=-1) > 0)
+            word_mask = char_ids.sum(dim=-1) > 0
 
         if labels is not None:
             if self.use_crf:

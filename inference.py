@@ -145,6 +145,8 @@ def load_model(
     mapping_path: str,
     model_name: str,
     device: str,
+    char_type: str = "cnn",
+    use_crf: bool = True,
 ) -> tuple[HybridModel, dict[str, int], dict[int, str], AutoTokenizer]:
     with open(vocab_path, "r", encoding="utf-8") as f:
         char_vocab: dict[str, int] = json.load(f)
@@ -167,6 +169,8 @@ def load_model(
         bert=bert_model,
         num_classes=num_classes,
         class_weights=None,  # tidak diperlukan saat inference
+        char_type=char_type,
+        use_crf=use_crf,
     )
 
     state = torch.load(model_path, map_location=device)
@@ -200,32 +204,21 @@ def load_model(
 
 def _decode_preds(
     preds: "torch.Tensor",
-    word_ids_batch: list[list[int | None]],
     words_batch: list[list[str]],
     idx_to_class: dict[int, str],
 ) -> list[list[str]]:
-    # Decode predictions to tags
+    # Preds sudah berada pada level kata (S_word) berkat pooling
     results: list[list[str]] = []
 
-    for b, (word_ids, words) in enumerate(zip(word_ids_batch, words_batch)):
+    for b, words in enumerate(words_batch):
         pred_seq = preds[b].tolist()
         tags: list[str] = []
-        prev_word: int | None = None
 
-        for t, word_id in enumerate(word_ids):
-            if word_id is None:
-                continue
+        for w in range(len(words)):
+            tag_idx = pred_seq[w] if w < len(pred_seq) else 0
+            tags.append(idx_to_class.get(tag_idx, "UNID"))
 
-            if word_id != prev_word:
-                tag_idx = pred_seq[t] if t < len(pred_seq) else 0
-                tags.append(idx_to_class.get(tag_idx, "UNID"))
-
-            prev_word = word_id
-
-        if len(tags) < len(words):
-            tags += ["UNID"] * (len(words) - len(tags))
-
-        results.append(tags[: len(words)])
+        results.append(tags)
 
     return results
 
@@ -284,9 +277,9 @@ def _predict_batch(
             attention_mask=attention_mask,
             word_ids=word_ids_batch,
             labels=None,
-        )  # (B, S_bert)
+        )  # (B, S_word)
 
-    return _decode_preds(preds, word_ids_batch, words_batch, idx_to_class)
+    return _decode_preds(preds, words_batch, idx_to_class)
 
 
 def _part_path(output_dir: Path, stem: str, part: int, suffix: str) -> Path:
@@ -494,6 +487,20 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--char_type",
+        type=str,
+        default="bilstm",
+        help="Tipe char extractor: 'none', 'cnn', atau 'bilstm'",
+    )
+
+    parser.add_argument(
+        "--use_crf",
+        type=lambda x: str(x).lower() in ["true", "1", "yes"],
+        default=True,
+        help="Aktifkan modul CRF (default True)",
+    )
+
+    parser.add_argument(
         "--limit", type=int, default=0, help="Batas jumlah kalimat (0 = semua)"
     )
 
@@ -554,6 +561,8 @@ def main() -> None:
         mapping_path=args.mapping_path,
         model_name=args.model_name,
         device=device,
+        char_type=args.char_type,
+        use_crf=args.use_crf,
     )
 
     # 3. Inference + simpan inkremental ke CSV
