@@ -90,7 +90,7 @@ def main(
     )
 
     # Verify label distribution balanced di semua split
-    log("Label distribution setelah split:", level=log_level.INFO)
+    log(domain="Main", msg="Label distribution setelah split:", level=log_level.INFO)
     for split_name, split_df in [
         ("Train", train_df),
         ("Val", val_df),
