@@ -1,3 +1,4 @@
+import os
 import json
 import yaml
 import torch
@@ -30,6 +31,7 @@ def main(
     char_type: str = "cnn",
     use_crf: bool = True,
     use_word_bilstm: bool = False,
+    config_name: str = "",
 ) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(domain="Main", msg=f"Using device: {device}", level=log_level.INFO)
@@ -43,11 +45,18 @@ def main(
 
     parts = ["IndoBERT", char_label, word_label, crf_label]
     ablation_name = " + ".join([p for p in parts if p and p != "(none)"])
+    
+    # Setup Output Directory
+    output_dir_name = config_name if config_name else "Custom"
+    output_dir = os.path.join("outputs", output_dir_name)
+    os.makedirs(output_dir, exist_ok=True)
+    
     log(
         domain="Main",
         msg=f"Konfigurasi Ablation: [{ablation_name}]",
         level=log_level.INFO,
     )
+    log(domain="Main", msg=f"Direktori Output: {output_dir}/", level=log_level.INFO)
 
     sample_data = pd.read_csv(data_path)
     dataInfo(sample_data)
@@ -186,7 +195,7 @@ def main(
         device=device,
         epochs=epochs,
         patience=patience,
-        checkpoint_path="best_model.pt",
+        checkpoint_path=os.path.join(output_dir, "best_model.pt"),
     )
 
     # Final evaluation pada test set (hanya sekali, setelah training selesai)
@@ -204,10 +213,12 @@ def main(
     compute_classification_report(test_preds, test_labels, idx_to_class)
 
     # Simpan vocab & class mapping untuk dipakai oleh inference.py
-    with open("char_vocab.json", "w", encoding="utf-8") as f:
+    char_vocab_path = os.path.join(output_dir, "char_vocab.json")
+    with open(char_vocab_path, "w", encoding="utf-8") as f:
         json.dump(char_vocab, f, ensure_ascii=False, indent=2)
 
-    with open("class_mappings.json", "w", encoding="utf-8") as f:
+    class_mappings_path = os.path.join(output_dir, "class_mappings.json")
+    with open(class_mappings_path, "w", encoding="utf-8") as f:
         json.dump(
             {
                 "class_to_idx": class_to_idx,
@@ -220,7 +231,7 @@ def main(
 
     log(
         domain="Main",
-        msg="Vocab & class mappings disimpan: char_vocab.json, class_mappings.json",
+        msg=f"Semua file (Model, Vocab, Class Mapping) berhasil disimpan di folder: {output_dir}/",
         level=log_level.INFO,
     )
 
@@ -339,4 +350,5 @@ if __name__ == "__main__":
         char_type=args.char_type,
         use_crf=args.use_crf,
         use_word_bilstm=args.use_word_bilstm,
+        config_name=args.config,
     )
