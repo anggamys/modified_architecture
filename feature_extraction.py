@@ -431,7 +431,7 @@ class HybridModel(nn.Module):
 
                 # --- CE Loss (auxiliary) ---
                 active_loss = word_mask.view(-1)
-                active_logits = emissions.view(-1, self.crf.num_tags)[active_loss]
+                active_logits = emissions.view(-1, emissions.shape[-1])[active_loss]
                 active_labels = labels.view(-1)[active_loss]
                 ce_loss = self.ce_loss(active_logits, active_labels)
 
@@ -442,7 +442,7 @@ class HybridModel(nn.Module):
             else:
                 # Baseline: CE murni (IndoBERT + Linear)
                 active_loss = word_mask.view(-1)
-                active_logits = emissions.view(-1, self.crf.num_tags)[active_loss]
+                active_logits = emissions.view(-1, emissions.shape[-1])[active_loss]
                 active_labels = labels.view(-1)[active_loss]
 
                 return self.ce_loss(active_logits, active_labels)
