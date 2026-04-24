@@ -291,6 +291,7 @@ class HybridModel(nn.Module):
         fusion_dim: int = 256,
         char_type: str = "cnn",  # "none" | "cnn" | "bilstm"
         use_crf: bool = True,
+        use_word_bilstm: bool = False,
     ) -> None:
         super().__init__()
 
@@ -319,6 +320,16 @@ class HybridModel(nn.Module):
         self.fusion = nn.Linear(bert_dim, fusion_dim)
         self.fusion_norm = nn.LayerNorm(fusion_dim)
         self.dropout = nn.Dropout(0.15)
+
+        self.use_word_bilstm = use_word_bilstm
+        if use_word_bilstm:
+            self.word_bilstm = nn.LSTM(
+                input_size=fusion_dim,
+                hidden_size=fusion_dim // 2,
+                num_layers=1,
+                batch_first=True,
+                bidirectional=True,
+            )
 
         # classifier head
         self.classifier = nn.Linear(fusion_dim, num_classes)
@@ -388,6 +399,23 @@ class HybridModel(nn.Module):
 
         x = self.fusion_norm(F.relu(self.fusion(x)))  # (B, S_word, fusion_dim)
         x = self.dropout(x)
+
+        # --- Word-BiLSTM ---
+        if getattr(self, "use_word_bilstm", False):
+            # word_mask belum ada jika dipanggil saat evaluasi standar tanpa batch?
+            # Sebaiknya kita generate dari char_ids sekarang juga jika None
+            if word_mask is None:
+                word_mask = char_ids.sum(dim=-1) > 0
+                
+            lengths = word_mask.sum(dim=1).clamp(min=1).cpu()
+            packed = nn.utils.rnn.pack_padded_sequence(
+                x, lengths, batch_first=True, enforce_sorted=False
+            )
+
+            packed_out, _ = self.word_bilstm(packed)
+            x, _ = nn.utils.rnn.pad_packed_sequence(
+                packed_out, batch_first=True, total_length=S_word
+            )
 
         emissions = self.classifier(x)  # (B, S_word, num_classes)
 

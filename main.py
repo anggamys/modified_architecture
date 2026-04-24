@@ -1,4 +1,5 @@
 import json
+import yaml
 import torch
 import pandas as pd
 
@@ -28,6 +29,7 @@ def main(
     batch_size: int = 16,
     char_type: str = "cnn",
     use_crf: bool = True,
+    use_word_bilstm: bool = False,
 ) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(domain="Main", msg=f"Using device: {device}", level=log_level.INFO)
@@ -36,7 +38,11 @@ def main(
     char_label = {"none": "(none)", "cnn": "Char-CNN", "bilstm": "Char-BiLSTM"}.get(
         char_type, char_type
     )
-    ablation_name = f"IndoBERT + {char_label} + {'CRF' if use_crf else 'Linear'}"
+    word_label = "Word-BiLSTM" if use_word_bilstm else ""
+    crf_label = "CRF" if use_crf else "Linear"
+
+    parts = ["IndoBERT", char_label, word_label, crf_label]
+    ablation_name = " + ".join([p for p in parts if p and p != "(none)"])
     log(
         domain="Main",
         msg=f"Konfigurasi Ablation: [{ablation_name}]",
@@ -121,6 +127,7 @@ def main(
         class_weights=class_weights,
         char_type=char_type,
         use_crf=use_crf,
+        use_word_bilstm=use_word_bilstm,
     ).to(device)
 
     log(
@@ -271,8 +278,57 @@ if __name__ == "__main__":
                 "help": "Aktifkan CRF decoder (False = baseline Linear/Softmax murni).",
                 "required": False,
             },
+            {
+                "flag": "--use_word_bilstm",
+                "type": bool,
+                "default": False,
+                "help": "Aktifkan Word-Level BiLSTM setelah agregasi/pooling subword (M3).",
+                "required": False,
+            },
+            {
+                "flag": "--config",
+                "type": str,
+                "default": "",
+                "help": "Pilih skenario dari config.yml (contoh: M1, M2, M3, dst). Mengesampingkan argumen lain.",
+                "required": False,
+            },
         ],
     ).parse_args()
+
+    # Jika --config digunakan, baca dari config.yml dan timpa (override) args
+    if args.config:
+        try:
+            with open("config.yml", "r", encoding="utf-8") as f:
+                config_data = yaml.safe_load(f)
+
+            if args.config in config_data:
+                scenario = config_data[args.config]
+                log(
+                    domain="Main",
+                    msg=f"Memuat konfigurasi YML untuk skenario: [{args.config}] - {scenario.get('description', '')}",
+                    level=log_level.INFO,
+                )
+
+                if "model_name" in scenario:
+                    args.model_name = scenario["model_name"]
+                if "char_type" in scenario:
+                    args.char_type = scenario["char_type"]
+                if "use_crf" in scenario:
+                    args.use_crf = scenario["use_crf"]
+                if "use_word_bilstm" in scenario:
+                    args.use_word_bilstm = scenario["use_word_bilstm"]
+            else:
+                log(
+                    domain="Main",
+                    msg=f"Peringatan: Skenario '{args.config}' tidak ditemukan di config.yml!",
+                    level=log_level.WARNING,
+                )
+        except Exception as e:
+            log(
+                domain="Main",
+                msg=f"Gagal membaca config.yml: {e}",
+                level=log_level.ERROR,
+            )
 
     main(
         data_path=args.data_path,
@@ -282,4 +338,5 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         char_type=args.char_type,
         use_crf=args.use_crf,
+        use_word_bilstm=args.use_word_bilstm,
     )
