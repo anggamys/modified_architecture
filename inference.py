@@ -50,10 +50,16 @@ def load_corpus_from_folder(
     txt_files = sorted(folder.glob("*.txt"))
 
     if not txt_files:
-        log(f"Tidak ada file .txt di: {folder_path}", level=log_level.WARNING)
+        log(
+            domain="Main",
+            msg=f"Tidak ada file .txt di: {folder_path}",
+            level=log_level.WARNING,
+        )
         return []
 
-    log(f"Ditemukan {len(txt_files)} file .txt", level=log_level.INFO)
+    log(
+        domain="Main", msg=f"Ditemukan {len(txt_files)} file .txt", level=log_level.INFO
+    )
 
     results: list[tuple[str, str]] = []
 
@@ -73,7 +79,11 @@ def load_corpus_from_folder(
         try:
             raw = txt_file.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
-            log(f"Gagal baca {txt_file.name}: {e}", level=log_level.WARNING)
+            log(
+                domain="Main",
+                msg=f"Gagal baca {txt_file.name}: {e}",
+                level=log_level.WARNING,
+            )
             continue
 
         raw = raw.replace("\r\n", "\n").replace("\r", "\n")
@@ -126,15 +136,22 @@ def load_corpus_from_folder(
         file_count = len(results) - prev_count
         tipe_file = "WhatsApp" if is_whatsapp else "Teks Standar"
         log(
-            f"  {txt_file.name} ({tipe_file}): {file_count:,} kalimat/pesan terekstrak",
+            domain="Main",
+            msg=f"  {txt_file.name} ({tipe_file}): {file_count:,} kalimat/pesan terekstrak",
             level=log_level.INFO,
         )
 
     if limit > 0:
         results = results[:limit]
-        log(f"Dibatasi {limit} kalimat pertama", level=log_level.INFO)
+        log(
+            domain="Main", msg=f"Dibatasi {limit} kalimat pertama", level=log_level.INFO
+        )
 
-    log(f"Total kalimat siap diinference: {len(results):,}", level=log_level.INFO)
+    log(
+        domain="Main",
+        msg=f"Total kalimat siap diinference: {len(results):,}",
+        level=log_level.INFO,
+    )
 
     return results
 
@@ -181,13 +198,15 @@ def load_model(
 
     if incompatible.unexpected_keys:
         log(
-            f"State dict keys dilewati (inference-only, aman): {incompatible.unexpected_keys}",
+            domain="Main",
+            msg=f"State dict keys dilewati (inference-only, aman): {incompatible.unexpected_keys}",
             level=log_level.INFO,
         )
 
     if incompatible.missing_keys:
         log(
-            f"State dict keys hilang (periksa arsitektur): {incompatible.missing_keys}",
+            domain="Main",
+            msg=f"State dict keys hilang (periksa arsitektur): {incompatible.missing_keys}",
             level=log_level.WARNING,
         )
 
@@ -195,7 +214,8 @@ def load_model(
     model.eval()
 
     log(
-        f"Model loaded: {model_path} | {num_classes} kelas | vocab={len(char_vocab)}",
+        domain="Main",
+        msg=f"Model loaded: {model_path} | {num_classes} kelas | vocab={len(char_vocab)}",
         level=log_level.INFO,
     )
 
@@ -316,7 +336,7 @@ def run_inference(
     if split_by in ("file", "rows"):
         output_dir = output.parent / output.stem  # ./data_pseudo_label/
         output_dir.mkdir(parents=True, exist_ok=True)
-        log(f"Output folder: {output_dir}/", level=log_level.INFO)
+        log(domain="Main", msg=f"Output folder: {output_dir}/", level=log_level.INFO)
     else:
         output_dir = output.parent  # satu file langsung di parent dir
 
@@ -419,8 +439,8 @@ def run_inference(
         processed = batch_start + len(batch)
         if processed % log_every == 0 or processed >= total:
             log(
-                f"Inference {processed:,}/{total:,} kalimat"
-                f" | Total ditulis = {total_tokens:,} token",
+                domain="Main",
+                msg=f"Inference {processed:,}/{total:,} kalimat | Total ditulis = {total_tokens:,} token",
                 level=log_level.INFO,
             )
 
@@ -432,12 +452,12 @@ def run_inference(
     # --- ringkasan file output ---
     written_files = list(writers.keys())
     log(
-        f"Selesai: {total_tokens:,} token dari {total:,} kalimat"
-        f" → {len(written_files)} file CSV",
+        domain="Main",
+        msg=f"Selesai: {total_tokens:,} token dari {total:,} kalimat → {len(written_files)} file CSV",
         level=log_level.INFO,
     )
     for fpath in written_files:
-        log(f"  {fpath}", level=log_level.INFO)
+        log(domain="Main", msg=f"  {fpath}", level=log_level.INFO)
 
     return total_tokens
 
@@ -541,7 +561,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    log(f"Device: {device}", level=log_level.INFO)
+    log(domain="Main", msg=f"Device: {device}", level=log_level.INFO)
 
     # 1. Baca corpora
     sentences = load_corpus_from_folder(
@@ -551,7 +571,11 @@ def main() -> None:
     )
 
     if not sentences:
-        log("Tidak ada kalimat untuk diproses. Keluar.", level=log_level.WARNING)
+        log(
+            domain="Main",
+            msg="Tidak ada kalimat untuk diproses. Keluar.",
+            level=log_level.WARNING,
+        )
         return
 
     # 2. Load model
@@ -580,7 +604,8 @@ def main() -> None:
     )
 
     log(
-        "Buka CSV, koreksi kolom 'pos_tag_koreksi', lalu gabungkan ke dataset training.",
+        domain="Main",
+        msg="Buka file pseudo labels, koreksi kolom 'pos_tag_koreksi', lalu gabungkan ke dataset training.",
         level=log_level.INFO,
     )
 

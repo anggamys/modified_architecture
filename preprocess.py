@@ -65,13 +65,15 @@ def split_train_val_test(
     n_docs = groups.nunique()
 
     log(
-        f"Total dokumen: {n_docs} | Total kalimat: {df['global_sentence_id'].nunique()}",
+        domain="Preprocess",
+        msg=f"Total dokumen: {n_docs} | Total kalimat: {df['global_sentence_id'].nunique()}",
         level=log_level.INFO,
     )
 
     # Log stratification info
     log(
-        f"MLU distribution: short={sum(df['_mlu_bucket'] == 'short')}, "
+        domain="Preprocess",
+        msg=f"MLU distribution: short={sum(df['_mlu_bucket'] == 'short')}, "
         f"medium={sum(df['_mlu_bucket'] == 'medium')}, "
         f"long={sum(df['_mlu_bucket'] == 'long')}",
         level=log_level.INFO,
@@ -128,12 +130,14 @@ def split_train_val_test(
     )
 
     log(
-        f"Split (dokumen) → train: {train_docs} | val: {val_docs} | test: {test_docs}",
+        domain="Preprocess",
+        msg=f"Split (dokumen) → train: {train_docs} | val: {val_docs} | test: {test_docs}",
         level=log_level.INFO,
     )
 
     log(
-        f"Split (token) → train: {len(train_df)} | val: {len(val_df)} | test: {len(test_df)}",
+        domain="Preprocess",
+        msg=f"Split (token) → train: {len(train_df)} | val: {len(val_df)} | test: {len(test_df)}",
         level=log_level.INFO,
     )
 
@@ -149,7 +153,11 @@ def class_distribution(dataframe: pd.DataFrame, column: str) -> None:
         f"{label}: {percentage:.4f}" for label, percentage in distribution.items()
     )
 
-    log(f"Class distribution for '{column}': {summary}", level=log_level.INFO)
+    log(
+        domain="Preprocess",
+        msg=f"Class distribution for '{column}': {summary}",
+        level=log_level.INFO,
+    )
 
 
 def build_char_vocab(
@@ -172,7 +180,11 @@ def build_char_vocab(
     # Standard printable chars (lowercase)
     standard_chars = string.ascii_lowercase + string.digits + " .,!?'-"
 
-    log(f"Total unique chars sebelum filter: {len(char_freq)}", level=log_level.INFO)
+    log(
+        domain="Preprocess",
+        msg=f"Total unique chars sebelum filter: {len(char_freq)}",
+        level=log_level.INFO,
+    )
 
     # Tambah standard chars
     for char in standard_chars:
@@ -191,11 +203,12 @@ def build_char_vocab(
                 idx += 1
 
     log(
-        f"Total unique chars setelah filter (min_freq={min_freq}): {len(char_vocab)}",
+        domain="Preprocess",
+        msg=f"Total unique chars setelah filter (min_freq={min_freq}): {len(char_vocab)}",
         level=log_level.INFO,
     )
 
-    log(f"Vocab size: {len(char_vocab)}", level=log_level.INFO)
+    log(domain="Preprocess", msg=f"Vocab size: {len(char_vocab)}", level=log_level.INFO)
 
     # Log distribusi karakter
     _log_char_distribution(char_freq, min_freq)
@@ -219,12 +232,16 @@ def _log_char_distribution(char_freq: Counter, min_freq: int = 5) -> None:
 
     summary = " | ".join(parts)
 
-    log(f"Top 15 karakter: {summary}", level=log_level.INFO)
+    log(domain="Preprocess", msg=f"Top 15 karakter: {summary}", level=log_level.INFO)
 
     rare_chars = sum(1 for _, freq in char_freq.items() if freq < min_freq)
 
     if rare_chars > 0:
-        log(f"Karakter langka (< {min_freq}x): {rare_chars}", level=log_level.WARNING)
+        log(
+            domain="Preprocess",
+            msg=f"Karakter langka (< {min_freq}x): {rare_chars}",
+            level=log_level.WARNING,
+        )
 
 
 def calculate_mlu(tokens: pd.Series) -> float:
@@ -241,7 +258,11 @@ def calculate_class_weights(labels: pd.Series, smooth: float = 1.0) -> Dict[str,
         for cls, count in value_counts.items()
     ]
 
-    log(f"Original class distribution: {' | '.join(dist_parts)}", level=log_level.INFO)
+    log(
+        domain="Preprocess",
+        msg=f"Original class distribution: {' | '.join(dist_parts)}",
+        level=log_level.INFO,
+    )
 
     # Hitung weights menggunakan inverse frequency
     weights = {}
@@ -265,7 +286,11 @@ def calculate_class_weights(labels: pd.Series, smooth: float = 1.0) -> Dict[str,
 
     # Log calculated weights (joined into single line)
     weight_parts = [f"{cls}: {weight:.4f}" for cls, weight in sorted(weights.items())]
-    log(f"Calculated class weights: {' | '.join(weight_parts)}", level=log_level.INFO)
+    log(
+        domain="Preprocess",
+        msg=f"Calculated class weights: {' | '.join(weight_parts)}",
+        level=log_level.INFO,
+    )
 
     return weights
 
@@ -306,26 +331,42 @@ def check_vocab_coverage(dataframe: pd.DataFrame, char_vocab: dict) -> None:
                     missing_chars_freq[char] += 1
 
     if total_chars_in_data == 0:
-        log("Tidak ada karakter dalam data", level=log_level.WARNING)
+        log(
+            domain="Preprocess",
+            msg="Tidak ada karakter dalam data",
+            level=log_level.WARNING,
+        )
 
         return
 
     coverage_percent = (covered_chars / total_chars_in_data) * 100
 
-    log(f"Vocab Coverage: {coverage_percent:.4f}%", level=log_level.INFO)
+    log(
+        domain="Preprocess",
+        msg=f"Vocab Coverage: {coverage_percent:.4f}%",
+        level=log_level.INFO,
+    )
 
     if len(missing_chars_freq) > 0:
         sorted_missing = sorted(
             missing_chars_freq.items(), key=lambda x: x[1], reverse=True
         )
 
-        log(f"OOV characters: {len(missing_chars_freq)}", level=log_level.WARNING)
+        log(
+            domain="Preprocess",
+            msg=f"OOV characters: {len(missing_chars_freq)}",
+            level=log_level.WARNING,
+        )
 
         oov_summary = " | ".join(
             f"{repr(char)}: {freq}x" for char, freq in sorted_missing
         )
 
-        log(f"OOV detail: {oov_summary}", level=log_level.WARNING)
+        log(
+            domain="Preprocess",
+            msg=f"OOV detail: {oov_summary}",
+            level=log_level.WARNING,
+        )
 
 
 def prepare_char_ids(tokens, char_vocab, max_word_len=50):

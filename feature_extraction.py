@@ -409,16 +409,19 @@ class HybridModel(nn.Module):
 
                 # Hybrid loss dengan pembobotan (alpha)
                 alpha = 0.7
+
                 return (alpha * crf_loss) + ((1 - alpha) * ce_loss)
             else:
                 # Baseline: CE murni (IndoBERT + Linear)
                 active_loss = word_mask.view(-1)
                 active_logits = emissions.view(-1, self.crf.num_tags)[active_loss]
                 active_labels = labels.view(-1)[active_loss]
+
                 return self.ce_loss(active_logits, active_labels)
 
         else:
             if self.use_crf:
                 return self.crf.decode(emissions, mask=word_mask)  # (B, S_word)
+
             else:
                 return emissions.argmax(dim=-1)  # (B, S_word)

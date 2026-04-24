@@ -14,9 +14,9 @@ def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.opti
     frozen_count = 0
     if freeze_bert_layers > 0:
         for name, param in model.named_parameters():
-            if 'encoder.layer' in name:
+            if "encoder.layer" in name:
                 try:
-                    layer_num = int(name.split('encoder.layer.')[1].split('.')[0])
+                    layer_num = int(name.split("encoder.layer.")[1].split(".")[0])
                     if layer_num < freeze_bert_layers:
                         param.requires_grad = False
                         frozen_count += 1
@@ -24,7 +24,8 @@ def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.opti
                     pass
 
         log(
-            f"Layer Freezing: {frozen_count} parameter dibekukan "
+            domain="Train",
+            msg=f"Layer Freezing: {frozen_count} parameter dibekukan "
             f"(encoder.layer 0–{freeze_bert_layers - 1})",
             level=log_level.INFO,
         )
@@ -36,7 +37,7 @@ def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.opti
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-            
+
         if "bert" in name:
             if "encoder.layer" in name:
                 try:
@@ -61,7 +62,8 @@ def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.opti
     optimizer = torch.optim.AdamW(param_groups, weight_decay=0.01)
 
     log(
-        f"Optimizer: Layer-wise Learning Rate Decay aktif | "
+        domain="Train",
+        msg=f"Optimizer: Layer-wise Learning Rate Decay aktif | "
         f"{len(other_params)} other params (lr=1e-3) | "
         f"{len(crf_params)} CRF params (lr=5e-3)",
         level=log_level.INFO,
@@ -84,7 +86,8 @@ def build_scheduler(
     )
 
     log(
-        f"Scheduler: {num_warmup_steps} warmup steps / {num_training_steps} total",
+        domain="Train",
+        msg=f"Scheduler: {num_warmup_steps} warmup steps / {num_training_steps} total",
         level=log_level.INFO,
     )
 
@@ -116,7 +119,7 @@ def compute_classification_report(
         digits=4,
     )
 
-    log(f"Classification Report:\n{report}", level=log_level.INFO)
+    log(domain="Train", msg=f"Classification Report:\n{report}", level=log_level.INFO)
     return report
 
 
@@ -233,32 +236,42 @@ def train_model(
     no_improve_count = 0  # counter untuk early stopping
 
     for epoch in range(1, epochs + 1):
-        log(f"Epoch {epoch}/{epochs}", level=log_level.INFO)
+        log(domain="Train", msg=f"Epoch {epoch}/{epochs}", level=log_level.INFO)
 
         train_loss = train_one_epoch(model, train_loader, optimizer, scheduler, device)
         val_loss, val_preds, val_labels = evaluate(model, val_loader, device)
 
         acc = compute_accuracy(val_preds, val_labels)
 
-        log(f"Train Loss : {train_loss:.4f}", level=log_level.INFO)
-        log(f"Val Loss   : {val_loss:.4f}", level=log_level.INFO)
-        log(f"Val Acc    : {acc:.4f} ({acc * 100:.2f}%)", level=log_level.INFO)
+        log(domain="Train", msg=f"Train Loss : {train_loss:.4f}", level=log_level.INFO)
+        log(domain="Train", msg=f"Val Loss   : {val_loss:.4f}", level=log_level.INFO)
+        log(
+            domain="Train",
+            msg=f"Val Acc    : {acc:.4f} ({acc * 100:.2f}%)",
+            level=log_level.INFO,
+        )
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             no_improve_count = 0
             torch.save(model.state_dict(), checkpoint_path)
-            log(f"Checkpoint saved → {checkpoint_path}", level=log_level.INFO)
+            log(
+                domain="Train",
+                msg=f"Checkpoint saved → {checkpoint_path}",
+                level=log_level.INFO,
+            )
         else:
             no_improve_count += 1
             log(
-                f"No improvement ({no_improve_count}/{patience})",
+                domain="Train",
+                msg=f"No improvement ({no_improve_count}/{patience})",
                 level=log_level.INFO,
             )
 
             if no_improve_count >= patience:
                 log(
-                    f"Early stopping triggered at epoch {epoch}. "
+                    domain="Train",
+                    msg=f"Early stopping triggered at epoch {epoch}. "
                     f"Best val loss: {best_val_loss:.4f}",
                     level=log_level.INFO,
                 )
@@ -266,4 +279,8 @@ def train_model(
 
     # Restore best weights sebelum return
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-    log(f"Training selesai. Best val loss: {best_val_loss:.4f}", level=log_level.INFO)
+    log(
+        domain="Train",
+        msg=f"Training selesai. Best val loss: {best_val_loss:.4f}",
+        level=log_level.INFO,
+    )

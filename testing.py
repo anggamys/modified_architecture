@@ -10,8 +10,8 @@ from transformers import (
     PreTrainedModel,
 )
 
-from utils import log, log_level, dowloadModel
 from preprocess import prepare_char_ids
+from utils import log, log_level, dowloadModel
 from feature_extraction import CharCNN, Bert, HybridModel
 
 
@@ -22,13 +22,21 @@ def test_feature_extraction(
     batch_size: int = 32,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ) -> tuple[CharCNN, Bert, HybridModel]:
-    log("Testing feature extraction", level=log_level.INFO)
+    log(domain="Testing", msg="Testing feature extraction", level=log_level.INFO)
 
     # Ambil sample batch
     sample_batch: pd.DataFrame = sample_data.head(batch_size).copy()
 
-    log(f"Sample batch size: {len(sample_batch)}", level=log_level.INFO)
-    log(f"Device: {device}", level=log_level.INFO)
+    log(
+        domain="Testing",
+        msg=f"Sample batch size: {len(sample_batch)}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"Device: {device}",
+        level=log_level.INFO,
+    )
 
     char_extraction: CharCNN = CharCNN(vocab_size=len(char_vocab))
     char_extraction.to(device)
@@ -44,23 +52,34 @@ def test_feature_extraction(
     )  # (1, B, W)
 
     log(
-        f"[CharCNN] Input shape (char_ids): {char_ids_tensor.shape} - (B, S, W)",
+        domain="Testing",
+        msg=f"[CharCNN] Input shape (char_ids): {char_ids_tensor.shape} - (B, S, W)",
         level=log_level.INFO,
     )
 
     with torch.no_grad():
         char_output: Tensor = char_extraction(char_ids_tensor)
 
-    log(f"[CharCNN] Output shape: {char_output.shape}", level=log_level.INFO)
-    log(f"[CharCNN] Output dtype: {char_output.dtype}", level=log_level.INFO)
     log(
-        f"[CharCNN] Output mean: {char_output.mean().item():.6f}, std: {char_output.std().item():.6f}",
+        domain="Testing",
+        msg=f"[CharCNN] Output shape: {char_output.shape}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"[CharCNN] Output dtype: {char_output.dtype}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"[CharCNN] Output mean: {char_output.mean().item():.6f}, std: {char_output.std().item():.6f}",
         level=log_level.INFO,
     )
 
     # Log sample output values
     log(
-        f"[CharCNN] Sample output values (first 5): {char_output.view(-1)[:5].cpu().numpy()}",
+        domain="Testing",
+        msg=f"[CharCNN] Sample output values (first 5): {char_output.view(-1)[:5].cpu().numpy()}",
         level=log_level.INFO,
     )
 
@@ -93,26 +112,52 @@ def test_feature_extraction(
     input_ids: Tensor = encoding["input_ids"]
     attention_mask: Tensor = encoding["attention_mask"]
 
-    log(f"[BERT] Input tokens: {len(tokens[:10])} tokens", level=log_level.INFO)
-    log(f"[BERT] Tokenized length: {input_ids.shape[1]}", level=log_level.INFO)
-    log(f"[BERT] Input shape (input_ids): {input_ids.shape}", level=log_level.INFO)
-    log(f"[BERT] Attention mask shape: {attention_mask.shape}", level=log_level.INFO)
+    log(
+        domain="Testing",
+        msg=f"[BERT] Input tokens: {len(tokens[:10])} tokens",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"[BERT] Tokenized length: {input_ids.shape[1]}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"[BERT] Input shape (input_ids): {input_ids.shape}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"[BERT] Attention mask shape: {attention_mask.shape}",
+        level=log_level.INFO,
+    )
 
     with torch.no_grad():
         bert_output: Tensor = bert_extraction(
             input_ids=input_ids, attention_mask=attention_mask
         )
 
-    log(f"[BERT] Output shape: {bert_output.shape}", level=log_level.INFO)
-    log(f"[BERT] Output dtype: {bert_output.dtype}", level=log_level.INFO)
     log(
-        f"[BERT] Output mean: {bert_output.mean().item():.6f}, std: {bert_output.std().item():.6f}",
+        domain="Testing",
+        msg=f"[BERT] Output shape: {bert_output.shape}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"[BERT] Output dtype: {bert_output.dtype}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"[BERT] Output mean: {bert_output.mean().item():.6f}, std: {bert_output.std().item():.6f}",
         level=log_level.INFO,
     )
 
     # Log sample output values
     log(
-        f"[BERT] Sample output values (first 5): {bert_output.view(-1)[:5].cpu().numpy()}",
+        domain="Testing",
+        msg=f"[BERT] Sample output values (first 5): {bert_output.view(-1)[:5].cpu().numpy()}",
         level=log_level.INFO,
     )
 
@@ -124,7 +169,11 @@ def test_feature_extraction(
     ).to(device)
     hybrid_model.eval()
 
-    log(f"Number of POS classes: {num_classes}", level=log_level.INFO)
+    log(
+        domain="Testing",
+        msg=f"Number of POS classes: {num_classes}",
+        level=log_level.INFO,
+    )
 
     # Labels harus di level kata (word-level), bukan subword.
     # _align_labels_to_bert akan memetakannya ke subword menggunakan word_ids.
@@ -133,7 +182,11 @@ def test_feature_extraction(
         dtype=torch.long,
     ).to(device)
 
-    log(f"[HybridModel] Labels shape: {labels.shape}", level=log_level.INFO)
+    log(
+        domain="Testing",
+        msg=f"[HybridModel] Labels shape: {labels.shape}",
+        level=log_level.INFO,
+    )
 
     with torch.no_grad():
         # Test forward pass dengan labels (untuk loss calculation)
@@ -145,7 +198,11 @@ def test_feature_extraction(
             labels=labels,
         )
 
-    log(f"[HybridModel] Loss (with labels): {loss.item():.6f}", level=log_level.INFO)
+    log(
+        domain="Testing",
+        msg=f"[HybridModel] Loss (with labels): {loss.item():.6f}",
+        level=log_level.INFO,
+    )
 
     # Test inference mode (tanpa labels)
     with torch.no_grad():
@@ -157,27 +214,58 @@ def test_feature_extraction(
             labels=None,
         )
 
-    log(f"[HybridModel] Predictions: {preds}", level=log_level.INFO)
     log(
-        f"[HybridModel] Number of predicted sequences: {len(preds)}",
+        domain="Testing",
+        msg=f"[HybridModel] Predictions: {preds}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"[HybridModel] Number of predicted sequences: {len(preds)}",
         level=log_level.INFO,
     )
 
     if len(preds) > 0:
         log(
-            f"[HybridModel] First sequence length: {len(preds[0])}",
+            domain="Testing",
+            msg=f"[HybridModel] First sequence length: {len(preds[0])}",
             level=log_level.INFO,
         )
         log(
-            f"[HybridModel] First sequence predictions: {preds[0][:10]}",
+            domain="Testing",
+            msg=f"[HybridModel] First sequence predictions: {preds[0][:10]}",
             level=log_level.INFO,
         )
 
-    log("Testing Summary", level=log_level.INFO)
-    log(f"CharCNN output shape: {char_output.shape}", level=log_level.INFO)
-    log(f"BERT output shape: {bert_output.shape}", level=log_level.INFO)
-    log(f"HybridModel loss: {loss.item():.6f}", level=log_level.INFO)
-    log(f"HybridModel predictions: {len(preds)} sequences", level=log_level.INFO)
-    log("All models tested successfully!", level=log_level.INFO)
+    log(
+        domain="Testing",
+        msg="Testing Summary",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"CharCNN output shape: {char_output.shape}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"BERT output shape: {bert_output.shape}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"HybridModel loss: {loss.item():.6f}",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg=f"HybridModel predictions: {len(preds)} sequences",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Testing",
+        msg="All models tested successfully!",
+        level=log_level.INFO,
+    )
 
     return char_extraction, bert_extraction, hybrid_model

@@ -30,12 +30,18 @@ def main(
     use_crf: bool = True,
 ) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    log(f"Using device: {device}", level=log_level.INFO)
+    log(domain="Main", msg=f"Using device: {device}", level=log_level.INFO)
 
     # Log konfigurasi ablation yang aktif
-    char_label = {"none": "(none)", "cnn": "Char-CNN", "bilstm": "Char-BiLSTM"}.get(char_type, char_type)
+    char_label = {"none": "(none)", "cnn": "Char-CNN", "bilstm": "Char-BiLSTM"}.get(
+        char_type, char_type
+    )
     ablation_name = f"IndoBERT + {char_label} + {'CRF' if use_crf else 'Linear'}"
-    log(f"Konfigurasi Ablation: [{ablation_name}]", level=log_level.INFO)
+    log(
+        domain="Main",
+        msg=f"Konfigurasi Ablation: [{ablation_name}]",
+        level=log_level.INFO,
+    )
 
     sample_data = pd.read_csv(data_path)
     dataInfo(sample_data)
@@ -48,7 +54,11 @@ def main(
     idx_to_class: dict[int, str] = {idx: cls for cls, idx in class_to_idx.items()}
     num_classes = len(class_to_idx)
 
-    log(f"Class to index mapping: {class_to_idx}", level=log_level.INFO)
+    log(
+        domain="Main",
+        msg=f"Class to index mapping: {class_to_idx}",
+        level=log_level.INFO,
+    )
 
     char_vocab = build_char_vocab(sample_data, min_freq=5, include_emoji=False)
 
@@ -59,7 +69,8 @@ def main(
     )
 
     log(
-        f"Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}",
+        domain="Main",
+        msg=f"Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}",
         level=log_level.INFO,
     )
 
@@ -72,7 +83,7 @@ def main(
     ]:
         dist = split_df["pos_tag"].value_counts(normalize=True)
         dist_str = " | ".join(f"{cls}: {pct:.4f}" for cls, pct in dist.items())
-        log(f"{split_name}: {dist_str}", level=log_level.INFO)
+        log(domain="Main", msg=f"{split_name}: {dist_str}", level=log_level.INFO)
 
     # calculate_class_weights: inverse frequency, dinormalisasi ke [0.5, 2.0]
     # create_torch_weight_tensor: mapping class name → tensor index
@@ -82,7 +93,8 @@ def main(
     )
 
     log(
-        "Class weights (top 5 heaviest): "
+        domain="Main",
+        msg="Class weights (top 5 heaviest): "
         + " | ".join(
             f"{idx_to_class[i]}: {class_weights[i].item():.3f}"
             for i in class_weights.argsort(descending=True)[:5].tolist()
@@ -112,7 +124,8 @@ def main(
     ).to(device)
 
     log(
-        f"Model parameters: "
+        domain="Main",
+        msg=f"Model parameters: "
         f"{sum(p.numel() for p in model.parameters()):,} total | "
         f"{sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable",
         level=log_level.INFO,
@@ -154,8 +167,8 @@ def main(
     )
 
     log(
-        f"DataLoader → train: {len(train_loader)} batch | "
-        f"val: {len(val_loader)} batch | test: {len(test_loader)} batch",
+        domain="Main",
+        msg=f"DataLoader → train: {len(train_loader)} batch | val: {len(val_loader)} batch | test: {len(test_loader)} batch",
         level=log_level.INFO,
     )
 
@@ -174,9 +187,10 @@ def main(
     test_loss, test_preds, test_labels = evaluate(model, test_loader, device)
     test_acc = compute_accuracy(test_preds, test_labels)
 
-    log(f"[Test] Loss     : {test_loss:.4f}", level=log_level.INFO)
+    log(domain="Main", msg=f"Test Loss     : {test_loss:.4f}", level=log_level.INFO)
     log(
-        f"[Test] Accuracy : {test_acc:.4f} ({test_acc * 100:.2f}%)",
+        domain="Main",
+        msg=f"Test Accuracy : {test_acc:.4f} ({test_acc * 100:.2f}%)",
         level=log_level.INFO,
     )
 
@@ -198,7 +212,8 @@ def main(
         )
 
     log(
-        "Vocab & class mappings disimpan: char_vocab.json, class_mappings.json",
+        domain="Main",
+        msg="Vocab & class mappings disimpan: char_vocab.json, class_mappings.json",
         level=log_level.INFO,
     )
 
