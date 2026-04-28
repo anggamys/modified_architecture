@@ -1,5 +1,8 @@
 import torch
+import json
+import pandas as pd
 import torch.nn as nn
+from pathlib import Path
 
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -9,7 +12,157 @@ from sklearn.metrics import classification_report
 from utils import log, log_level
 
 
-def build_optimizer(model: nn.Module, freeze_bert_layers: int = 8) -> torch.optim.AdamW:
+def extract_tokens_from_dataset(dataset) -> list[str]:
+    """
+    Extract all tokens dari POSDataset dalam urutan yang sesuai dengan predictions.
+
+    Returns:
+        list[str]: Daftar token terurut sesuai dengan urutan eval/test
+    """
+    all_tokens = []
+
+    # Iterasi setiap sentence (grouped by global_sentence_id)
+    for sent_df in dataset.sentences:
+        tokens = sent_df["token"].astype(str).tolist()
+        all_tokens.extend(tokens)
+
+    return all_tokens
+
+
+def save_test_results(
+    tokens: list[str],
+    preds: list[int],
+    labels: list[int],
+    idx_to_class: dict[int, str],
+    output_path: str,
+    format_type: str = "csv",
+) -> None:
+    """
+    Simpan hasil test (token, true label, predicted label) untuk analisis confusion matrix.
+
+    Args:
+        tokens: List of tokens
+        preds: List of predicted class indices
+        labels: List of true label indices
+        idx_to_class: Mapping dari index ke class name
+        output_path: Path untuk menyimpan file
+        format_type: Format penyimpanan ('csv', 'json', 'both')
+    """
+
+    # Validasi input
+    if not (len(tokens) == len(preds) == len(labels)):
+        log(
+            domain="Train",
+            msg=f"WARNING: Panjang tokens ({len(tokens)}), preds ({len(preds)}), "
+            f"labels ({len(labels)}) tidak sesuai!",
+            level=log_level.WARNING,
+        )
+        return
+
+    # Konversi indices ke class names
+    pred_labels = [idx_to_class.get(p, f"UNK_{p}") for p in preds]
+    true_labels = [idx_to_class.get(label, f"UNK_{label}") for label in labels]
+
+    # Hitung correctness
+    correct = [p == label for p, label in zip(preds, labels)]
+
+    # Buat DataFrame
+    results_df = pd.DataFrame(
+        {
+            "token": tokens,
+            "true_label": true_labels,
+            "pred_label": pred_labels,
+            "correct": correct,
+            "true_idx": labels,
+            "pred_idx": preds,
+        }
+    )
+
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Simpan sesuai format
+    if format_type in ["csv", "both"]:
+        csv_path = str(output_path).replace(".json", "").replace(".csv", "") + ".csv"
+        results_df.to_csv(csv_path, index=False, encoding="utf-8")
+        log(
+            domain="Train",
+            msg=f"Test results saved to CSV: {csv_path}",
+            level=log_level.INFO,
+        )
+
+    if format_type in ["json", "both"]:
+        json_path = str(output_path).replace(".csv", "").replace(".json", "") + ".json"
+
+        # Format JSON untuk readability & analisis
+        results_json = {
+            "summary": {
+                "total_tokens": len(tokens),
+                "correct": sum(correct),
+                "accuracy": sum(correct) / len(correct) if correct else 0,
+            },
+            "predictions": [],
+        }
+
+        for idx, row in results_df.iterrows():
+            results_json["predictions"].append(
+                {
+                    "idx": int(idx),
+                    "token": row["token"],
+                    "true_label": row["true_label"],
+                    "pred_label": row["pred_label"],
+                    "correct": bool(row["correct"]),
+                }
+            )
+
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(results_json, f, ensure_ascii=False, indent=2)
+
+        log(
+            domain="Train",
+            msg=f"Test results saved to JSON: {json_path}",
+            level=log_level.INFO,
+        )
+
+    # Log summary statistics
+    accuracy = sum(correct) / len(correct) if correct else 0
+    log(
+        domain="Train",
+        msg=f"Test Results Summary: {sum(correct)}/{len(correct)} correct "
+        f"(Accuracy: {accuracy:.4f} / {accuracy * 100:.2f}%)",
+        level=log_level.INFO,
+    )
+
+    # Log top misclassifications
+    errors_df = results_df[~results_df["correct"]].copy()
+    if len(errors_df) > 0:
+        log(
+            domain="Train",
+            msg=f"Total misclassifications: {len(errors_df)}",
+            level=log_level.INFO,
+        )
+
+        # Top 10 most common error patterns
+        error_patterns = (
+            errors_df.groupby(["true_label", "pred_label"])
+            .size()
+            .sort_values(ascending=False)
+            .head(10)
+        )
+
+        log(
+            domain="Train",
+            msg="Top 10 misclassification patterns (true → pred):",
+            level=log_level.INFO,
+        )
+        for (true_label, pred_label), count in error_patterns.items():
+            log(
+                domain="Train",
+                msg=f"  {true_label} → {pred_label}: {count}x",
+                level=log_level.INFO,
+            )
+
+    return results_df
     # --- Layer Freezing: Bekukan N layer pertama IndoBERT ---
     frozen_count = 0
     if freeze_bert_layers > 0:
@@ -97,7 +250,7 @@ def build_scheduler(
 def compute_accuracy(preds: list[int], labels: list[int]) -> float:
     if len(labels) == 0:
         return 0.0
-    correct = sum(p == l for p, l in zip(preds, labels))  # noqa: E741
+    correct = sum(p == label for p, label in zip(preds, labels))
     return correct / len(labels)
 
 
@@ -216,6 +369,75 @@ def evaluate(
 
     avg_loss = total_loss / len(dataloader)
     return avg_loss, all_preds, all_labels
+
+
+def evaluate_with_tokens(
+    model: nn.Module,
+    dataloader: DataLoader,
+    dataset,
+    device: str,
+) -> tuple[float, list[str], list[int], list[int]]:
+    """
+    Evaluate model dan track tokens untuk analisis confusion matrix.
+
+    Args:
+        model: Model untuk evaluation
+        dataloader: DataLoader
+        dataset: POSDataset instance untuk extract tokens
+        device: Device (cuda/cpu)
+
+    Returns:
+        Tuple of (avg_loss, tokens, preds, labels)
+    """
+    # Extract tokens dalam urutan yang sesuai
+    tokens = extract_tokens_from_dataset(dataset)
+
+    model.eval()
+    total_loss = 0.0
+    all_preds: list[int] = []
+    all_labels: list[int] = []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            char_ids: Tensor = batch["char_ids"].to(device)
+            input_ids: Tensor = batch["input_ids"].to(device)
+            attention_mask: Tensor = batch["attention_mask"].to(device)
+            word_mask: Tensor = batch["word_mask"].to(device)
+            labels: Tensor = batch["labels"].to(device)
+            word_ids: list[list[int | None]] = batch["word_ids"]
+
+            # Forward dengan labels → dapat loss
+            loss: Tensor = model(
+                char_ids=char_ids,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                word_ids=word_ids,
+                word_mask=word_mask,
+                labels=labels,
+            )
+
+            # Forward tanpa labels → dapat predictions dari Viterbi
+            preds: Tensor = model(
+                char_ids=char_ids,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                word_ids=word_ids,
+                word_mask=word_mask,
+                labels=None,
+            )
+
+            total_loss += loss.item()
+
+            # Kumpulkan preds & labels hanya di posisi kata yang valid
+            B, S_word = labels.shape
+            for b in range(B):
+                for w in range(S_word):
+                    if word_mask[b, w]:
+                        all_preds.append(preds[b, w].item())
+                        all_labels.append(labels[b, w].item())
+
+    avg_loss = total_loss / len(dataloader)
+    return avg_loss, tokens, all_preds, all_labels
 
 
 def train_model(

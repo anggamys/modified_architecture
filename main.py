@@ -19,7 +19,13 @@ from preprocess import (
 from feature_extraction import HybridModel
 from dataset import POSDataset, make_collate_fn
 from utils import dataInfo, log, log_level, argParser, dowloadModel
-from train import train_model, evaluate, compute_accuracy, compute_classification_report
+from train import (
+    train_model,
+    evaluate_with_tokens,
+    compute_accuracy,
+    compute_classification_report,
+    save_test_results,
+)
 
 
 def main(
@@ -45,12 +51,12 @@ def main(
 
     parts = ["IndoBERT", char_label, word_label, crf_label]
     ablation_name = " + ".join([p for p in parts if p and p != "(none)"])
-    
+
     # Setup Output Directory
     output_dir_name = config_name if config_name else "Custom"
     output_dir = os.path.join("outputs", output_dir_name)
     os.makedirs(output_dir, exist_ok=True)
-    
+
     log(
         domain="Main",
         msg=f"Konfigurasi Ablation: [{ablation_name}]",
@@ -198,9 +204,11 @@ def main(
         checkpoint_path=os.path.join(output_dir, "best_model.pt"),
     )
 
-    # Final evaluation pada test set (hanya sekali, setelah training selesai)
+    # Final evaluation pada test set dengan tracking tokens untuk confusion matrix analysis
     # train_model sudah me-restore best checkpoint sebelum return
-    test_loss, test_preds, test_labels = evaluate(model, test_loader, device)
+    test_loss, test_tokens, test_preds, test_labels = evaluate_with_tokens(
+        model, test_loader, test_dataset, device
+    )
     test_acc = compute_accuracy(test_preds, test_labels)
 
     log(domain="Main", msg=f"Test Loss     : {test_loss:.4f}", level=log_level.INFO)
@@ -211,6 +219,17 @@ def main(
     )
 
     compute_classification_report(test_preds, test_labels, idx_to_class)
+
+    # Simpan hasil test (token, true label, pred label) untuk confusion matrix & error analysis
+    test_results_path = os.path.join(output_dir, "test_results")
+    save_test_results(
+        tokens=test_tokens,
+        preds=test_preds,
+        labels=test_labels,
+        idx_to_class=idx_to_class,
+        output_path=test_results_path,
+        format_type="both",  # Simpan sebagai CSV dan JSON
+    )
 
     # Simpan vocab & class mapping untuk dipakai oleh inference.py
     char_vocab_path = os.path.join(output_dir, "char_vocab.json")
