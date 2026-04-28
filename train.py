@@ -163,6 +163,22 @@ def save_test_results(
             )
 
     return results_df
+
+
+def build_optimizer(
+    model: nn.Module,
+    freeze_bert_layers: int = 2,
+) -> torch.optim.Optimizer:
+    """
+    Build optimizer dengan Layer-wise Learning Rate Decay (LLRD) untuk BERT layers.
+
+    Args:
+        model: PyTorch model
+        freeze_bert_layers: Jumlah layer pertama BERT yang dibekukan (dari bawah)
+
+    Returns:
+        torch.optim.AdamW optimizer dengan parameter groups yang custom
+    """
     # --- Layer Freezing: Bekukan N layer pertama IndoBERT ---
     frozen_count = 0
     if freeze_bert_layers > 0:
