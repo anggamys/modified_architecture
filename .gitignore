@@ -5,6 +5,7 @@ article/
 markdown/
 raw_corpora/
 raw_corpora_wa/
+training_result/
 
 # Python built-in cache
 __pycache__/

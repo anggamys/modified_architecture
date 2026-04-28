@@ -12,21 +12,25 @@ from sklearn.metrics import classification_report
 from utils import log, log_level
 
 
-def extract_tokens_from_dataset(dataset) -> list[str]:
+def extract_tokens_from_dataset(dataset) -> tuple[list[str], list[int], list[int]]:
     """
     Extract all tokens dari POSDataset dalam urutan yang sesuai dengan predictions.
 
     Returns:
-        list[str]: Daftar token terurut sesuai dengan urutan eval/test
+        tuple[list[str], list[int], list[int]]: Daftar token terurut, sent_indices, token_indices
     """
     all_tokens = []
+    sent_indices = []
+    token_indices = []
 
     # Iterasi setiap sentence (grouped by global_sentence_id)
-    for sent_df in dataset.sentences:
+    for sent_idx, sent_df in enumerate(dataset.sentences):
         tokens = sent_df["token"].astype(str).tolist()
         all_tokens.extend(tokens)
+        sent_indices.extend([sent_idx] * len(tokens))
+        token_indices.extend(list(range(len(tokens))))
 
-    return all_tokens
+    return all_tokens, sent_indices, token_indices
 
 
 def save_test_results(
@@ -36,6 +40,8 @@ def save_test_results(
     idx_to_class: dict[int, str],
     output_path: str,
     format_type: str = "csv",
+    sent_indices: list[int] = None,
+    token_indices: list[int] = None,
 ) -> None:
     """
     Simpan hasil test (token, true label, predicted label) untuk analisis confusion matrix.
@@ -67,16 +73,21 @@ def save_test_results(
     correct = [p == label for p, label in zip(preds, labels)]
 
     # Buat DataFrame
-    results_df = pd.DataFrame(
-        {
-            "token": tokens,
-            "true_label": true_labels,
-            "pred_label": pred_labels,
-            "correct": correct,
-            "true_idx": labels,
-            "pred_idx": preds,
-        }
-    )
+    df_data = {}
+    if sent_indices is not None and token_indices is not None:
+        df_data["sentence_id"] = sent_indices
+        df_data["token_idx"] = token_indices
+        
+    df_data.update({
+        "token": tokens,
+        "true_label": true_labels,
+        "pred_label": pred_labels,
+        "correct": correct,
+        "true_idx": labels,
+        "pred_idx": preds,
+    })
+    
+    results_df = pd.DataFrame(df_data)
 
     output_dir = Path(output_path).parent
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -104,16 +115,34 @@ def save_test_results(
             "predictions": [],
         }
 
-        for idx, row in results_df.iterrows():
-            results_json["predictions"].append(
-                {
-                    "idx": int(idx),
-                    "token": row["token"],
-                    "true_label": row["true_label"],
-                    "pred_label": row["pred_label"],
-                    "correct": bool(row["correct"]),
-                }
-            )
+        if "sentence_id" in results_df.columns:
+            for sent_idx, group in results_df.groupby("sentence_id", sort=False):
+                sent_preds = []
+                for _, row in group.iterrows():
+                    sent_preds.append(
+                        {
+                            "token_idx": int(row["token_idx"]),
+                            "token": row["token"],
+                            "true_label": row["true_label"],
+                            "pred_label": row["pred_label"],
+                            "correct": bool(row["correct"]),
+                        }
+                    )
+                results_json["predictions"].append({
+                    "sentence_id": int(sent_idx),
+                    "tokens": sent_preds
+                })
+        else:
+            for idx, row in results_df.iterrows():
+                results_json["predictions"].append(
+                    {
+                        "idx": int(idx),
+                        "token": row["token"],
+                        "true_label": row["true_label"],
+                        "pred_label": row["pred_label"],
+                        "correct": bool(row["correct"]),
+                    }
+                )
 
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(results_json, f, ensure_ascii=False, indent=2)
@@ -392,7 +421,7 @@ def evaluate_with_tokens(
     dataloader: DataLoader,
     dataset,
     device: str,
-) -> tuple[float, list[str], list[int], list[int]]:
+) -> tuple[float, list[str], list[int], list[int], list[int], list[int]]:
     """
     Evaluate model dan track tokens untuk analisis confusion matrix.
 
@@ -403,10 +432,10 @@ def evaluate_with_tokens(
         device: Device (cuda/cpu)
 
     Returns:
-        Tuple of (avg_loss, tokens, preds, labels)
+        Tuple of (avg_loss, tokens, preds, labels, sent_indices, token_indices)
     """
     # Extract tokens dalam urutan yang sesuai
-    tokens = extract_tokens_from_dataset(dataset)
+    tokens, sent_indices, token_indices = extract_tokens_from_dataset(dataset)
 
     model.eval()
     total_loss = 0.0
@@ -453,7 +482,7 @@ def evaluate_with_tokens(
                         all_labels.append(labels[b, w].item())
 
     avg_loss = total_loss / len(dataloader)
-    return avg_loss, tokens, all_preds, all_labels
+    return avg_loss, tokens, all_preds, all_labels, sent_indices, token_indices
 
 
 def train_model(

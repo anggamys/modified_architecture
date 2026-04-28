@@ -206,7 +206,7 @@ def main(
 
     # Final evaluation pada test set dengan tracking tokens untuk confusion matrix analysis
     # train_model sudah me-restore best checkpoint sebelum return
-    test_loss, test_tokens, test_preds, test_labels = evaluate_with_tokens(
+    test_loss, test_tokens, test_preds, test_labels, sent_indices, token_indices = evaluate_with_tokens(
         model, test_loader, test_dataset, device
     )
     test_acc = compute_accuracy(test_preds, test_labels)
@@ -229,6 +229,8 @@ def main(
         idx_to_class=idx_to_class,
         output_path=test_results_path,
         format_type="both",  # Simpan sebagai CSV dan JSON
+        sent_indices=sent_indices,
+        token_indices=token_indices,
     )
 
     # Simpan vocab & class mapping untuk dipakai oleh inference.py
@@ -246,6 +248,18 @@ def main(
             f,
             ensure_ascii=False,
             indent=2,
+        )
+
+    if use_crf and hasattr(model, "crf"):
+        transition_matrix = model.crf.transitions.detach().cpu().numpy()
+        tag_list = [idx_to_class.get(i, f"TAG_{i}") for i in range(num_classes)]
+        df_transitions = pd.DataFrame(transition_matrix, index=tag_list, columns=tag_list)
+        transitions_csv_path = os.path.join(output_dir, "crf_transitions.csv")
+        df_transitions.to_csv(transitions_csv_path)
+        log(
+            domain="Main",
+            msg=f"Matriks transisi CRF berhasil disimpan ke: {transitions_csv_path}",
+            level=log_level.INFO,
         )
 
     log(
