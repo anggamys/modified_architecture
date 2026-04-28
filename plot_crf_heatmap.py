@@ -48,8 +48,8 @@ def plot_heatmap(csv_path, output_png="heatmap_crf.png"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot Heatmap untuk CRF Transition Matrix")
-    parser.add_argument("--csv_path", type=str, default="outputs/Custom/crf_transitions.csv", help="Path ke file CSV matriks transisi")
-    parser.add_argument("--output_png", type=str, default="heatmap_crf.png", help="Path output file PNG resolusi tinggi")
+    parser.add_argument("--csv_path", type=str, default="training_result/crf_transitions.csv", help="Path ke file CSV matriks transisi")
+    parser.add_argument("--output_png", type=str, default="analyst/heatmap_crf.png", help="Path output file PNG resolusi tinggi")
     args = parser.parse_args()
     
     plot_heatmap(args.csv_path, args.output_png)

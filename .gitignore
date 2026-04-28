@@ -2,6 +2,7 @@
 data/
 models/
 article/
+analyst/
 markdown/
 raw_corpora/
 raw_corpora_wa/
