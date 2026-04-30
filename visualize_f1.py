@@ -8,7 +8,7 @@ def plot_f1_scores(models, classes, output_dir, save_path):
     f1_scores = {model: [] for model in models}
     
     for model in models:
-        json_path = os.path.join(output_dir, model, "classification_report.json")
+        json_path = os.path.join(output_dir, f"classification_report_{model.lower()}.json")
         if not os.path.exists(json_path):
             print(f"Warning: Data for model {model} not found at {json_path}. Filling with 0.")
             f1_scores[model] = [0.0] * len(classes)
@@ -46,6 +46,7 @@ def plot_f1_scores(models, classes, output_dir, save_path):
         ax.bar_label(rects, padding=3, fmt='%.2f', fontsize=9)
         
     ax.set_ylabel('F1-Score')
+    ax.set_xlabel('Word Class')
     ax.set_title('F1-Score Comparison by Word Class and Model')
     ax.set_xticks(x, classes)
     ax.legend(loc='upper right')
@@ -63,8 +64,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize F1-Scores across different models.")
     parser.add_argument("--models", nargs='+', default=["M1", "M4", "M6"], help="List of models to compare")
     parser.add_argument("--classes", nargs='+', default=["N-ABS", "N-KON", "VB-T", "INTJ", "UNID"], help="List of word classes to compare")
-    parser.add_argument("--outputs_dir", type=str, default="outputs", help="Base directory where model outputs are stored")
-    parser.add_argument("--save_path", type=str, default="f1_comparison.png", help="Path to save the generated graph")
+    parser.add_argument("--outputs_dir", type=str, default="training_result", help="Base directory where model outputs are stored")
+    parser.add_argument("--save_path", type=str, default="./analyst/f1_comparison.png", help="Path to save the generated graph")
     
     args = parser.parse_args()
     
