@@ -201,7 +201,7 @@ def main(
         device=device,
         epochs=epochs,
         patience=patience,
-        checkpoint_path=os.path.join(output_dir, "best_model.pt"),
+        checkpoint_path=os.path.join(output_dir, f"best_model_{model_name.lower()}.pt"),
     )
 
     # Final evaluation pada test set dengan tracking tokens untuk confusion matrix analysis
@@ -218,11 +218,11 @@ def main(
         level=log_level.INFO,
     )
 
-    report_path = os.path.join(output_dir, "classification_report.json")
+    report_path = os.path.join(output_dir, f"classification_report_{model_name.lower()}.json")
     compute_classification_report(test_preds, test_labels, idx_to_class, output_path=report_path)
 
     # Simpan hasil test (token, true label, pred label) untuk confusion matrix & error analysis
-    test_results_path = os.path.join(output_dir, "test_results")
+    test_results_path = os.path.join(output_dir, f"test_results_{model_name.lower()}")
     save_test_results(
         tokens=test_tokens,
         preds=test_preds,
@@ -235,11 +235,11 @@ def main(
     )
 
     # Simpan vocab & class mapping untuk dipakai oleh inference.py
-    char_vocab_path = os.path.join(output_dir, "char_vocab.json")
+    char_vocab_path = os.path.join(output_dir, f"char_vocab_{model_name.lower()}.json")
     with open(char_vocab_path, "w", encoding="utf-8") as f:
         json.dump(char_vocab, f, ensure_ascii=False, indent=2)
 
-    class_mappings_path = os.path.join(output_dir, "class_mappings.json")
+    class_mappings_path = os.path.join(output_dir, f"class_mappings_{model_name.lower()}.json")
     with open(class_mappings_path, "w", encoding="utf-8") as f:
         json.dump(
             {
@@ -255,7 +255,7 @@ def main(
         transition_matrix = model.crf.transitions.detach().cpu().numpy()
         tag_list = [idx_to_class.get(i, f"TAG_{i}") for i in range(num_classes)]
         df_transitions = pd.DataFrame(transition_matrix, index=tag_list, columns=tag_list)
-        transitions_csv_path = os.path.join(output_dir, "crf_transitions.csv")
+        transitions_csv_path = os.path.join(output_dir, f"crf_transitions_{model_name.lower()}.csv")
         df_transitions.to_csv(transitions_csv_path)
         log(
             domain="Main",
