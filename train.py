@@ -303,6 +303,7 @@ def compute_classification_report(
     preds: list[int],
     labels: list[int],
     idx_to_class: dict[int, str],
+    output_path: str = None,
 ) -> str:
     # Ambil hanya kelas yang muncul di preds atau labels (hindari baris kosong)
     present = sorted(set(preds) | set(labels))
@@ -318,6 +319,20 @@ def compute_classification_report(
     )
 
     log(domain="Train", msg=f"Classification Report:\n{report}", level=log_level.INFO)
+    
+    if output_path is not None:
+        report_dict = classification_report(
+            labels,
+            preds,
+            labels=present,
+            target_names=target_names,
+            zero_division=0,
+            output_dict=True,
+        )
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(report_dict, f, ensure_ascii=False, indent=2)
+        log(domain="Train", msg=f"Classification Report saved to {output_path}", level=log_level.INFO)
+
     return report
 
 

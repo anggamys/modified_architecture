@@ -218,7 +218,8 @@ def main(
         level=log_level.INFO,
     )
 
-    compute_classification_report(test_preds, test_labels, idx_to_class)
+    report_path = os.path.join(output_dir, "classification_report.json")
+    compute_classification_report(test_preds, test_labels, idx_to_class, output_path=report_path)
 
     # Simpan hasil test (token, true label, pred label) untuk confusion matrix & error analysis
     test_results_path = os.path.join(output_dir, "test_results")
