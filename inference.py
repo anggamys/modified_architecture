@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 import numpy as np
 import pandas as pd
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerBase
 
 from utils import log, log_level
 from feature_extraction import HybridModel
@@ -164,7 +164,7 @@ def load_model(
     device: str,
     char_type: str = "cnn",
     use_crf: bool = True,
-) -> tuple[HybridModel, dict[str, int], dict[int, str], AutoTokenizer]:
+) -> tuple[HybridModel, dict[str, int], dict[int, str], PreTrainedTokenizerBase]:
     with open(vocab_path, "r", encoding="utf-8") as f:
         char_vocab: dict[str, int] = json.load(f)
 
@@ -248,7 +248,7 @@ def _predict_batch(
     model: HybridModel,
     char_vocab: dict[str, int],
     idx_to_class: dict[int, str],
-    tokenizer: AutoTokenizer,
+    tokenizer: PreTrainedTokenizerBase,
     device: str,
     max_word_len: int = 50,
     max_seq_len: int = 512,
@@ -263,8 +263,10 @@ def _predict_batch(
         max_length=max_seq_len,
     )
 
-    input_ids = encoding["input_ids"].to(device)  # (B, S_bert)
-    attention_mask = encoding["attention_mask"].to(device)  # (B, S_bert)
+    input_ids = torch.as_tensor(encoding["input_ids"], device=device)  # (B, S_bert)
+    attention_mask = torch.as_tensor(
+        encoding["attention_mask"], device=device
+    )  # (B, S_bert)
     word_ids_batch = [encoding.word_ids(batch_index=i) for i in range(len(words_batch))]
 
     max_words = max(len(w) for w in words_batch)
@@ -285,9 +287,9 @@ def _predict_batch(
     ).to(device)
 
     amp_ctx = (
-        torch.amp.autocast(device_type="cuda")
+        torch.autocast(device_type="cuda")
         if use_amp and device == "cuda"
-        else torch.amp.autocast(device_type="cpu", enabled=False)
+        else torch.autocast(device_type="cpu", enabled=False)
     )
 
     with torch.no_grad(), amp_ctx:
@@ -316,7 +318,7 @@ def run_inference(
     model: HybridModel,
     char_vocab: dict[str, int],
     idx_to_class: dict[int, str],
-    tokenizer: AutoTokenizer,
+    tokenizer: PreTrainedTokenizerBase,
     device: str,
     output_path: str,
     batch_size: int = 32,

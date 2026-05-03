@@ -125,14 +125,6 @@ def main(
 
     model_path: str = dowloadModel(model_name)
 
-    # test_feature_extraction(
-    #     sample_data=train_df,
-    #     char_vocab=char_vocab,
-    #     model_name=model_name,
-    #     batch_size=32,
-    #     device=device,
-    # )
-
     bert_model = AutoModel.from_pretrained(model_path)
 
     model = HybridModel(
@@ -206,8 +198,8 @@ def main(
 
     # Final evaluation pada test set dengan tracking tokens untuk confusion matrix analysis
     # train_model sudah me-restore best checkpoint sebelum return
-    test_loss, test_tokens, test_preds, test_labels, sent_indices, token_indices = evaluate_with_tokens(
-        model, test_loader, test_dataset, device
+    test_loss, test_tokens, test_preds, test_labels, sent_indices, token_indices = (
+        evaluate_with_tokens(model, test_loader, test_dataset, device)
     )
     test_acc = compute_accuracy(test_preds, test_labels)
 
@@ -218,8 +210,12 @@ def main(
         level=log_level.INFO,
     )
 
-    report_path = os.path.join(output_dir, f"classification_report_{model_name.lower()}.json")
-    compute_classification_report(test_preds, test_labels, idx_to_class, output_path=report_path)
+    report_path = os.path.join(
+        output_dir, f"classification_report_{model_name.lower()}.json"
+    )
+    compute_classification_report(
+        test_preds, test_labels, idx_to_class, output_path=report_path
+    )
 
     # Simpan hasil test (token, true label, pred label) untuk confusion matrix & error analysis
     test_results_path = os.path.join(output_dir, f"test_results_{model_name.lower()}")
@@ -239,7 +235,9 @@ def main(
     with open(char_vocab_path, "w", encoding="utf-8") as f:
         json.dump(char_vocab, f, ensure_ascii=False, indent=2)
 
-    class_mappings_path = os.path.join(output_dir, f"class_mappings_{model_name.lower()}.json")
+    class_mappings_path = os.path.join(
+        output_dir, f"class_mappings_{model_name.lower()}.json"
+    )
     with open(class_mappings_path, "w", encoding="utf-8") as f:
         json.dump(
             {
@@ -254,8 +252,12 @@ def main(
     if use_crf and hasattr(model, "crf"):
         transition_matrix = model.crf.transitions.detach().cpu().numpy()
         tag_list = [idx_to_class.get(i, f"TAG_{i}") for i in range(num_classes)]
-        df_transitions = pd.DataFrame(transition_matrix, index=tag_list, columns=tag_list)
-        transitions_csv_path = os.path.join(output_dir, f"crf_transitions_{model_name.lower()}.csv")
+        df_transitions = pd.DataFrame(
+            transition_matrix, index=tag_list, columns=tag_list
+        )
+        transitions_csv_path = os.path.join(
+            output_dir, f"crf_transitions_{model_name.lower()}.csv"
+        )
         df_transitions.to_csv(transitions_csv_path)
         log(
             domain="Main",

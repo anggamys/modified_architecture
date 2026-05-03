@@ -3,6 +3,7 @@ import json
 import pandas as pd
 import torch.nn as nn
 from pathlib import Path
+from typing import Any
 
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -40,9 +41,9 @@ def save_test_results(
     idx_to_class: dict[int, str],
     output_path: str,
     format_type: str = "csv",
-    sent_indices: list[int] = None,
-    token_indices: list[int] = None,
-) -> None:
+    sent_indices: list[int] | None = None,
+    token_indices: list[int] | None = None,
+) -> pd.DataFrame:
     """
     Simpan hasil test (token, true label, predicted label) untuk analisis confusion matrix.
 
@@ -63,11 +64,17 @@ def save_test_results(
             f"labels ({len(labels)}) tidak sesuai!",
             level=log_level.WARNING,
         )
-        return
+
+        return pd.DataFrame()
 
     # Konversi indices ke class names
     pred_labels = [idx_to_class.get(p, f"UNK_{p}") for p in preds]
     true_labels = [idx_to_class.get(label, f"UNK_{label}") for label in labels]
+
+    def _to_int(value: Any) -> int:
+        if hasattr(value, "item"):
+            value = value.item()
+        return int(value)
 
     # Hitung correctness
     correct = [p == label for p, label in zip(preds, labels)]
@@ -77,16 +84,18 @@ def save_test_results(
     if sent_indices is not None and token_indices is not None:
         df_data["sentence_id"] = sent_indices
         df_data["token_idx"] = token_indices
-        
-    df_data.update({
-        "token": tokens,
-        "true_label": true_labels,
-        "pred_label": pred_labels,
-        "correct": correct,
-        "true_idx": labels,
-        "pred_idx": preds,
-    })
-    
+
+    df_data.update(
+        {
+            "token": tokens,
+            "true_label": true_labels,
+            "pred_label": pred_labels,
+            "correct": correct,
+            "true_idx": labels,
+            "pred_idx": preds,
+        }
+    )
+
     results_df = pd.DataFrame(df_data)
 
     output_dir = Path(output_path).parent
@@ -121,22 +130,22 @@ def save_test_results(
                 for _, row in group.iterrows():
                     sent_preds.append(
                         {
-                            "token_idx": int(row["token_idx"]),
+                            "token_idx": _to_int(row["token_idx"]),
                             "token": row["token"],
                             "true_label": row["true_label"],
                             "pred_label": row["pred_label"],
                             "correct": bool(row["correct"]),
                         }
                     )
-                results_json["predictions"].append({
-                    "sentence_id": int(sent_idx),
-                    "tokens": sent_preds
-                })
+
+                results_json["predictions"].append(
+                    {"sentence_id": _to_int(sent_idx), "tokens": sent_preds}
+                )
         else:
             for idx, row in results_df.iterrows():
                 results_json["predictions"].append(
                     {
-                        "idx": int(idx),
+                        "idx": _to_int(idx),
                         "token": row["token"],
                         "true_label": row["true_label"],
                         "pred_label": row["pred_label"],
@@ -184,7 +193,9 @@ def save_test_results(
             msg="Top 10 misclassification patterns (true → pred):",
             level=log_level.INFO,
         )
-        for (true_label, pred_label), count in error_patterns.items():
+        for (true_label, pred_label), count in zip(
+            error_patterns.index.tolist(), error_patterns.tolist()
+        ):
             log(
                 domain="Train",
                 msg=f"  {true_label} → {pred_label}: {count}x",
@@ -254,8 +265,10 @@ def build_optimizer(
             other_params.append(param)
 
     # Tambahkan layer luar dengan LR lebih agresif
-    param_groups.append({"params": other_params, "lr": 1e-3})
-    param_groups.append({"params": crf_params, "lr": 5e-3})
+    if other_params:
+        param_groups.append({"params": other_params, "lr": 1e-3})
+    if crf_params:
+        param_groups.append({"params": crf_params, "lr": 5e-3})
 
     optimizer = torch.optim.AdamW(param_groups, weight_decay=0.01)
 
@@ -303,7 +316,7 @@ def compute_classification_report(
     preds: list[int],
     labels: list[int],
     idx_to_class: dict[int, str],
-    output_path: str = None,
+    output_path: str | None = None,
 ) -> str:
     # Ambil hanya kelas yang muncul di preds atau labels (hindari baris kosong)
     present = sorted(set(preds) | set(labels))
@@ -316,10 +329,10 @@ def compute_classification_report(
         target_names=target_names,
         zero_division=0,
         digits=4,
-    )
+    )  # type: ignore
 
     log(domain="Train", msg=f"Classification Report:\n{report}", level=log_level.INFO)
-    
+
     if output_path is not None:
         report_dict = classification_report(
             labels,
@@ -331,7 +344,11 @@ def compute_classification_report(
         )
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(report_dict, f, ensure_ascii=False, indent=2)
-        log(domain="Train", msg=f"Classification Report saved to {output_path}", level=log_level.INFO)
+        log(
+            domain="Train",
+            msg=f"Classification Report saved to {output_path}",
+            level=log_level.INFO,
+        )
 
     return report
 
@@ -340,7 +357,7 @@ def train_one_epoch(
     model: nn.Module,
     dataloader: DataLoader,
     optimizer: torch.optim.Optimizer,
-    scheduler: object,
+    scheduler: Any,
     device: str,
 ) -> float:
     model.train()
@@ -424,8 +441,8 @@ def evaluate(
             for b in range(B):
                 for w in range(S_word):
                     if word_mask[b, w]:
-                        all_preds.append(preds[b, w].item())
-                        all_labels.append(labels[b, w].item())
+                        all_preds.append(int(preds[b, w].item()))
+                        all_labels.append(int(labels[b, w].item()))
 
     avg_loss = total_loss / len(dataloader)
     return avg_loss, all_preds, all_labels
@@ -493,8 +510,8 @@ def evaluate_with_tokens(
             for b in range(B):
                 for w in range(S_word):
                     if word_mask[b, w]:
-                        all_preds.append(preds[b, w].item())
-                        all_labels.append(labels[b, w].item())
+                        all_preds.append(int(preds[b, w].item()))
+                        all_labels.append(int(labels[b, w].item()))
 
     avg_loss = total_loss / len(dataloader)
     return avg_loss, tokens, all_preds, all_labels, sent_indices, token_indices

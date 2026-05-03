@@ -406,7 +406,7 @@ class HybridModel(nn.Module):
             # Sebaiknya kita generate dari char_ids sekarang juga jika None
             if word_mask is None:
                 word_mask = char_ids.sum(dim=-1) > 0
-                
+
             lengths = word_mask.sum(dim=1).clamp(min=1).cpu()
             packed = nn.utils.rnn.pack_padded_sequence(
                 x, lengths, batch_first=True, enforce_sorted=False

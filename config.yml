@@ -1,36 +1,36 @@
 M1:
-  description: "Baseline murni: IndoBERT-base + Linear Softmax (Tanpa Char, Tanpa CRF)"
-  model_name: "indobenchmark/indobert-base-p1"
-  char_type: "none"
+  description: 'Baseline murni: IndoBERT-base + Linear Softmax (Tanpa Char, Tanpa CRF)'
+  model_name: 'indobenchmark/indobert-base-p1'
+  char_type: 'none'
   use_crf: false
 
 M2:
-  description: "Ablasi 1: IndoBERT-base + CRF (Menambah otak sintaksis)"
-  model_name: "indobenchmark/indobert-base-p1"
-  char_type: "none"
+  description: 'Ablasi 1: IndoBERT-base + CRF (Menambah otak sintaksis)'
+  model_name: 'indobenchmark/indobert-base-p1'
+  char_type: 'none'
   use_crf: true
 
 M3:
-  description: "Ablasi 2: IndoBERT-base + Word-BiLSTM + CRF (Mengevaluasi pengolahan urutan kata secara hierarkis)"
-  model_name: "indobenchmark/indobert-base-p1"
-  char_type: "none"
+  description: 'Ablasi 2: IndoBERT-base + Word-BiLSTM + CRF (Mengevaluasi pengolahan urutan kata secara hierarkis)'
+  model_name: 'indobenchmark/indobert-base-p1'
+  char_type: 'none'
   use_crf: true
   use_word_bilstm: true
 
 M4:
-  description: "Proposed Awal: IndoBERT-base + Char-CNN + CRF (Arsitektur V1)"
-  model_name: "indobenchmark/indobert-base-p1"
-  char_type: "cnn"
+  description: 'Proposed Awal: IndoBERT-base + Char-CNN + CRF (Arsitektur V1)'
+  model_name: 'indobenchmark/indobert-base-p1'
+  char_type: 'cnn'
   use_crf: true
 
 M5:
-  description: "Optimasi Morfologi: IndoBERT-base + Char-BiLSTM + CRF (Arsitektur V2)"
-  model_name: "indobenchmark/indobert-base-p1"
-  char_type: "bilstm"
+  description: 'Optimasi Morfologi: IndoBERT-base + Char-BiLSTM + CRF (Arsitektur V2)'
+  model_name: 'indobenchmark/indobert-base-p1'
+  char_type: 'bilstm'
   use_crf: true
 
 M6:
-  description: "Domain Adaptation: IndoBERTweet + Char-BiLSTM + CRF (Arsitektur V3 Final)"
-  model_name: "dafqi/IndoBertTweet"
-  char_type: "bilstm"
+  description: 'Domain Adaptation: IndoBERTweet + Char-BiLSTM + CRF (Arsitektur V3 Final)'
+  model_name: 'dafqi/IndoBertTweet'
+  char_type: 'bilstm'
   use_crf: true
