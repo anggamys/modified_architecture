@@ -1,31 +1,30 @@
-import os
 import json
-import yaml
-import torch
-import pandas as pd
+import os
 
+import pandas as pd
+import torch
+import yaml
 from torch.utils.data import DataLoader
 from transformers import AutoModel, AutoTokenizer
 
+from dataset import POSDataset, make_collate_fn
+from feature_extraction import HybridModel
 from preprocess import (
     build_char_vocab,
+    calculate_class_weights,
     check_vocab_coverage,
     class_distribution,
-    split_train_val_test,
-    calculate_class_weights,
     create_torch_weight_tensor,
+    split_train_val_test,
 )
-
-from feature_extraction import HybridModel
-from dataset import POSDataset, make_collate_fn
-from utils import dataInfo, log, log_level, argParser, dowloadModel
 from train import (
-    train_model,
-    evaluate_with_tokens,
     compute_accuracy,
     compute_classification_report,
+    evaluate_with_tokens,
     save_test_results,
+    train_model,
 )
+from utils import argParser, dataInfo, dowloadModel, log, log_level
 
 
 def main(
@@ -193,7 +192,9 @@ def main(
         device=device,
         epochs=epochs,
         patience=patience,
-        checkpoint_path=os.path.join(output_dir, f"best_model_{model_name.lower()}.pt"),
+        checkpoint_path=os.path.join(
+            output_dir, f"best_model_{config_name.lower()}.pt"
+        ),
     )
 
     # Final evaluation pada test set dengan tracking tokens untuk confusion matrix analysis
@@ -211,14 +212,14 @@ def main(
     )
 
     report_path = os.path.join(
-        output_dir, f"classification_report_{model_name.lower()}.json"
+        output_dir, f"classification_report_{config_name.lower()}.json"
     )
     compute_classification_report(
         test_preds, test_labels, idx_to_class, output_path=report_path
     )
 
     # Simpan hasil test (token, true label, pred label) untuk confusion matrix & error analysis
-    test_results_path = os.path.join(output_dir, f"test_results_{model_name.lower()}")
+    test_results_path = os.path.join(output_dir, f"test_results_{config_name.lower()}")
     save_test_results(
         tokens=test_tokens,
         preds=test_preds,
@@ -231,12 +232,12 @@ def main(
     )
 
     # Simpan vocab & class mapping untuk dipakai oleh inference.py
-    char_vocab_path = os.path.join(output_dir, f"char_vocab_{model_name.lower()}.json")
+    char_vocab_path = os.path.join(output_dir, f"char_vocab_{config_name.lower()}.json")
     with open(char_vocab_path, "w", encoding="utf-8") as f:
         json.dump(char_vocab, f, ensure_ascii=False, indent=2)
 
     class_mappings_path = os.path.join(
-        output_dir, f"class_mappings_{model_name.lower()}.json"
+        output_dir, f"class_mappings_{config_name.lower()}.json"
     )
     with open(class_mappings_path, "w", encoding="utf-8") as f:
         json.dump(
@@ -256,7 +257,7 @@ def main(
             transition_matrix, index=tag_list, columns=tag_list
         )
         transitions_csv_path = os.path.join(
-            output_dir, f"crf_transitions_{model_name.lower()}.csv"
+            output_dir, f"crf_transitions_{config_name.lower()}.csv"
         )
         df_transitions.to_csv(transitions_csv_path)
         log(
