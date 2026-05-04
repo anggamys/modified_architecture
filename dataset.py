@@ -114,7 +114,7 @@ def pos_collate_fn(
     input_ids: Tensor = torch.full((B, S_bert_max), pad_token_id, dtype=torch.long)
     attention_mask: Tensor = torch.zeros(B, S_bert_max, dtype=torch.long)
     word_mask: Tensor = torch.zeros(B, S_word_max, dtype=torch.bool)
-    labels: Tensor = torch.zeros(B, S_bert_max, dtype=torch.long)
+    labels: Tensor = torch.zeros(B, S_word_max, dtype=torch.long)
     word_ids_batch: List[List[Optional[int]]] = []
 
     # Fill tensors for each sample in batch
@@ -127,17 +127,16 @@ def pos_collate_fn(
         attention_mask[i, :s_bert] = item["attention_mask"]
         word_mask[i, :s_word] = True
 
-        # Map word-level labels to BERT token-level using word_ids
-        word_ids: List[Optional[int]] = item["word_ids"]
+        # Assign word-level labels directly (no BERT token mapping needed here)
         word_labels: Tensor = item["labels"]  # (S_word,)
+        labels[i, :s_word] = word_labels
 
-        for t, word_id in enumerate(word_ids):
-            if word_id is not None and word_id < len(word_labels):
-                labels[i, t] = word_labels[word_id]
+        # Store word_ids for the model to use in _pool_bert_to_word
+        word_ids: List[Optional[int]] = item["word_ids"]
 
         # Padding positions di word_ids diberi None agar model tahu itu bukan kata
-        padded_wids: List[Optional[int]] = item["word_ids"] + [None] * (
-            S_bert_max - s_bert
+        padded_wids: List[Optional[int]] = word_ids + [None] * (
+            S_bert_max - len(word_ids)
         )
         word_ids_batch.append(padded_wids)
 
