@@ -162,7 +162,7 @@ def class_distribution(dataframe: pd.DataFrame, column: str) -> None:
 
 def build_char_vocab(
     dataframe: pd.DataFrame, min_freq: int = 5, include_emoji: bool = False
-) -> dict:
+) -> Dict[str, int]:
     char_vocab = {"<PAD>": 0, "<UNK>": 1}
     idx = 2
 
@@ -309,7 +309,7 @@ def create_torch_weight_tensor(
     return weight_tensor
 
 
-def check_vocab_coverage(dataframe: pd.DataFrame, char_vocab: dict) -> None:
+def check_vocab_coverage(dataframe: pd.DataFrame, char_vocab: Dict[str, int]) -> None:
     total_chars_in_data = 0
     covered_chars = 0
     missing_chars_freq = {}
@@ -369,7 +369,9 @@ def check_vocab_coverage(dataframe: pd.DataFrame, char_vocab: dict) -> None:
         )
 
 
-def prepare_char_ids(tokens, char_vocab, max_word_len=50):
+def prepare_char_ids(
+    tokens: list[str], char_vocab: Dict[str, int], max_word_len: int = 50
+) -> np.ndarray:
     char_ids_list = []
 
     for token in tokens:

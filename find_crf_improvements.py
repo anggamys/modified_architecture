@@ -1,7 +1,8 @@
 import json
 import os
+from typing import Any, List, Dict
 
-def load_data_flat(filepath):
+def load_data_flat(filepath: str) -> List[Dict[str, Any]]:
     if not os.path.exists(filepath):
         return []
         
@@ -22,7 +23,7 @@ def load_data_flat(filepath):
             
     return flat_tokens
 
-def compare_models(file_m1, file_m6):
+def compare_models(file_m1: str, file_m6: str) -> None:
     if not os.path.exists(file_m1) or not os.path.exists(file_m6):
         print(f"Error: Pastikan file {file_m1} dan {file_m6} tersedia.")
         return

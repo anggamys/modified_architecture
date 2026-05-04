@@ -13,7 +13,7 @@ from sklearn.metrics import classification_report
 from utils import log, log_level
 
 
-def extract_tokens_from_dataset(dataset) -> tuple[list[str], list[int], list[int]]:
+def extract_tokens_from_dataset(dataset: Any) -> tuple[list[str], list[int], list[int]]:
     """
     Extract all tokens dari POSDataset dalam urutan yang sesuai dengan predictions.
 
@@ -287,7 +287,7 @@ def build_scheduler(
     optimizer: torch.optim.Optimizer,
     num_training_steps: int,
     warmup_ratio: float = 0.1,
-) -> object:
+) -> Any:
     num_warmup_steps = int(warmup_ratio * num_training_steps)
 
     scheduler = get_linear_schedule_with_warmup(

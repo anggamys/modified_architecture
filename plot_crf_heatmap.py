@@ -3,8 +3,9 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import argparse
 import os
+from typing import Optional
 
-def plot_heatmap(csv_path, output_png="heatmap_crf.png"):
+def plot_heatmap(csv_path: str, output_png: str = "heatmap_crf.png") -> None:
     print(f"Memuat data dari: {csv_path}")
     if not os.path.exists(csv_path):
         print(f"Error: File {csv_path} tidak ditemukan!")

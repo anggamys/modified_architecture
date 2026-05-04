@@ -142,7 +142,7 @@ class Bert(nn.Module):
 
 
 class CRF(nn.Module):
-    def __init__(self, num_tags):
+    def __init__(self, num_tags: int) -> None:
         super().__init__()
         self.num_tags = num_tags
 
@@ -152,17 +152,17 @@ class CRF(nn.Module):
         self.start_transitions = nn.Parameter(torch.randn(num_tags))
         self.end_transitions = nn.Parameter(torch.randn(num_tags))
 
-    def forward(self, emissions, tags, mask):
+    def forward(self, emissions: Tensor, tags: Tensor, mask: Tensor) -> Tensor:
         # Langsung return mean NLL — jangan di-negate lagi di luar
         log_likelihood = self._log_likelihood(emissions, tags, mask)
         return -log_likelihood.mean()
 
-    def _log_likelihood(self, emissions, tags, mask):
+    def _log_likelihood(self, emissions: Tensor, tags: Tensor, mask: Tensor) -> Tensor:
         gold_score = self._score_sentence(emissions, tags, mask)
         partition = self._compute_partition(emissions, mask)
         return gold_score - partition
 
-    def _score_sentence(self, emissions, tags, mask):
+    def _score_sentence(self, emissions: Tensor, tags: Tensor, mask: Tensor) -> Tensor:
         B, S, _ = emissions.shape
 
         # mulai dari start transition ke tag pertama
@@ -186,7 +186,7 @@ class CRF(nn.Module):
 
         return score
 
-    def _compute_partition(self, emissions, mask):
+    def _compute_partition(self, emissions: Tensor, mask: Tensor) -> Tensor:
         B, S, C = emissions.shape
 
         # inisiasi dengan start transitions + emisi posisi pertama
@@ -209,10 +209,10 @@ class CRF(nn.Module):
 
         return torch.logsumexp(alpha, dim=1)  # (B,) — per-sample, bukan .sum()
 
-    def decode(self, emissions, mask):
+    def decode(self, emissions: Tensor, mask: Tensor) -> Tensor:
         return self._viterbi_decode(emissions, mask)
 
-    def _viterbi_decode(self, emissions, mask):
+    def _viterbi_decode(self, emissions: Tensor, mask: Tensor) -> Tensor:
         B, S, C = emissions.shape
 
         seq_len = mask.long().sum(dim=1)  # (B,) — valid length per sample
