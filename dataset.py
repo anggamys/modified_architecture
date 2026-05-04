@@ -1,12 +1,12 @@
-import torch
+from functools import partial
+from typing import Any, Callable, Dict, List, Optional
+
 import numpy as np
 import pandas as pd
-
-from functools import partial
-from typing import Dict, List, Optional, Any, Callable
+import torch
 from torch import Tensor
 from torch.utils.data import Dataset
-from transformers import PreTrainedTokenizerBase, BatchEncoding
+from transformers import BatchEncoding, PreTrainedTokenizerBase
 
 from preprocess import prepare_char_ids
 

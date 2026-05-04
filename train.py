@@ -553,6 +553,7 @@ def train_model(
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             no_improve_count = 0
+            Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), checkpoint_path)
             log(
                 domain="Train",
