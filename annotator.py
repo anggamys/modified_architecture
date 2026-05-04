@@ -1,14 +1,15 @@
+import json
 import os
 import re
-import json
-import torch
+from typing import Dict, List, Union
+
 import numpy as np
-from transformers import AutoTokenizer, AutoModel
-from typing import List, Dict, Union
+import torch
+from transformers import AutoModel, AutoTokenizer
 
 # Import arsitektur model dan fungsi preprocessing dari file Anda
 from feature_extraction import HybridModel
-from preprocess import normalize_text, clean_text, prepare_char_ids
+from preprocess import clean_text, normalize_text, prepare_char_ids
 
 
 class POSAnnotator:
@@ -29,7 +30,7 @@ class POSAnnotator:
     ):
         """
         Inisialisasi anotator.
-        
+
         Args:
             model_dir (str): Folder tempat best_model.pt, char_vocab.json, dan class_mappings.json berada (misal: 'outputs/M6').
             huggingface_model (str): Nama model dasar di HuggingFace (misal: 'dafqi/IndoBertTweet').
@@ -38,15 +39,29 @@ class POSAnnotator:
             use_word_bilstm (bool): Apakah menggunakan Word-BiLSTM layer.
             device (str): 'cuda' atau 'cpu'. Jika None, otomatis mendeteksi ketersediaan GPU.
         """
-        self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
+        # Auto-detect device, fallback to CPU if GPU has compatibility issues
+        if device:
+            self.device = device
+        else:
+            try:
+                if torch.cuda.is_available():
+                    # Try to use CUDA; if it fails, fallback to CPU
+                    torch.cuda.current_device()
+                    self.device = "cuda"
+                else:
+                    self.device = "cpu"
+            except RuntimeError:
+                # CUDA incompatibility error - use CPU
+                self.device = "cpu"
+                print("⚠️  GPU incompatibility detected. Using CPU instead.")
         self.char_type = char_type
         self.use_crf = use_crf
         self.use_word_bilstm = use_word_bilstm
         self.max_word_len = 50
 
         # Load Vocab & Mappings
-        vocab_path = os.path.join(model_dir, "char_vocab.json")
-        mapping_path = os.path.join(model_dir, "class_mappings.json")
+        vocab_path = os.path.join(model_dir, "char_vocab_m6.json")
+        mapping_path = os.path.join(model_dir, "class_mappings_m6.json")
 
         with open(vocab_path, "r", encoding="utf-8") as f:
             self.char_vocab = json.load(f)
@@ -68,17 +83,17 @@ class POSAnnotator:
             char_vocab_size=len(self.char_vocab),
             bert=bert_model,
             num_classes=num_classes,
-            class_weights=None, # Tidak diperlukan saat inference
+            class_weights=None,  # Tidak diperlukan saat inference
             char_type=self.char_type,
             use_crf=self.use_crf,
             use_word_bilstm=self.use_word_bilstm,
         )
 
         # Load Weights (Checkpoint)
-        model_path = os.path.join(model_dir, "best_model.pt")
+        model_path = os.path.join(model_dir, "best_model_m6.pt")
         print(f"Loading checkpoint weights from {model_path}...")
         state_dict = torch.load(model_path, map_location="cpu", weights_only=True)
-        
+
         # Hapus loss weight jika ada
         if "ce_loss.weight" in state_dict:
             del state_dict["ce_loss.weight"]
@@ -86,7 +101,7 @@ class POSAnnotator:
         self.model.load_state_dict(state_dict, strict=False)
         self.model.to(self.device)
         self.model.eval()
-        
+
         print(f"Annotator siap dijalankan pada device: {self.device}")
 
     def _tokenize_text(self, text: str) -> List[str]:
@@ -94,22 +109,24 @@ class POSAnnotator:
         text = re.sub(r"([?!,.\(\)])", r" \1 ", text)
         return [t for t in text.split() if t]
 
-    def annotate(self, text: str, return_format: str = "dict") -> Union[List[Dict[str, str]], List[tuple]]:
+    def annotate(
+        self, text: str, return_format: str = "dict"
+    ) -> Union[List[Dict[str, str]], List[tuple]]:
         """
         Melakukan anotasi POS Tagging pada satu kalimat atau paragraf.
-        
+
         Args:
             text (str): Teks kalimat atau paragraf yang akan dianotasi.
-            return_format (str): 'dict' mengembalikan [{'token': 'saya', 'tag': 'PR-P1'}], 
+            return_format (str): 'dict' mengembalikan [{'token': 'saya', 'tag': 'PR-P1'}],
                                  'tuple' mengembalikan [('saya', 'PR-P1')]
-                                 
+
         Returns:
             Hasil anotasi kata beserta labelnya.
         """
         # Normalisasi
         text = normalize_text(clean_text(text))
         words = self._tokenize_text(text)
-        
+
         if not words:
             return []
 
@@ -129,13 +146,19 @@ class POSAnnotator:
 
         # Siapkan karakter embedding
         cids = prepare_char_ids(words, self.char_vocab, self.max_word_len)
-        char_ids = torch.from_numpy(np.expand_dims(cids, axis=0)).to(self.device) # (1, S_word, W)
+        char_ids = torch.from_numpy(np.expand_dims(cids, axis=0)).to(
+            self.device
+        )  # (1, S_word, W)
 
         # Inference
         with torch.no_grad():
             # Support FP16 AMP jika tersedia
-            amp_ctx = torch.amp.autocast(device_type="cuda") if self.device == "cuda" else torch.amp.autocast(device_type="cpu", enabled=False)
-            
+            amp_ctx = (
+                torch.amp.autocast(device_type="cuda")
+                if self.device == "cuda"
+                else torch.amp.autocast(device_type="cpu", enabled=False)
+            )
+
             with amp_ctx:
                 preds = self.model(
                     char_ids=char_ids,
@@ -158,26 +181,53 @@ class POSAnnotator:
         else:
             return [{"token": w, "tag": t} for w, t in zip(words, tags)]
 
+
 # --- CONTOH PENGGUNAAN (Hanya dieksekusi jika file dijalankan secara langsung) ---
 if __name__ == "__main__":
     # Ini contoh asumsikan kita sedang menggunakan skenario M6 (IndoBERTweet + BiLSTM + CRF)
     print("=== Demo POS Annotator ===")
     try:
         annotator = POSAnnotator(
-            model_dir="outputs/M6", 
+            model_dir="training_result/M6",
             huggingface_model="dafqi/IndoBertTweet",
             char_type="bilstm",
             use_crf=True,
-            use_word_bilstm=False
+            use_word_bilstm=False,
+            device="cpu",  # Force CPU if GPU has compatibility issues
         )
-        
+
         teks_sampel = "Bsk gw mau pergi belanja ke Ps. Minggu buat beli sayuran seger bangetttt njirr wkwk 😂"
         hasil = annotator.annotate(teks_sampel)
-        
+
         print("\n[Input Text]:", teks_sampel)
         print("\n[Hasil Anotasi]:")
         for item in hasil:
             print(f"{item['token']:<15} : {item['tag']}")
-            
+
+    except RuntimeError as e:
+        if "CUDA" in str(e) or "cuDNN" in str(e):
+            print("⚠️  GPU/CUDA compatibility error detected. Retrying with CPU...")
+            try:
+                annotator = POSAnnotator(
+                    model_dir="training_result/M6",
+                    huggingface_model="dafqi/IndoBertTweet",
+                    char_type="bilstm",
+                    use_crf=True,
+                    use_word_bilstm=False,
+                    device="cpu",
+                )
+                teks_sampel = "Bsk gw mau pergi belanja ke Ps. Minggu buat beli sayuran seger bangetttt njirr wkwk 😂"
+                hasil = annotator.annotate(teks_sampel)
+
+                print("\n[Input Text]:", teks_sampel)
+                print("\n[Hasil Anotasi]:")
+                for item in hasil:
+                    print(f"{item['token']:<15} : {item['tag']}")
+            except Exception as cpu_error:
+                print(f"❌ Error even with CPU: {cpu_error}")
+        else:
+            raise
     except FileNotFoundError:
-        print("Folder 'outputs/M6' belum memiliki model yang lengkap. Lakukan training terlebih dahulu.")
+        print(
+            "Folder 'training_result/M6' belum memiliki model yang lengkap. Lakukan training terlebih dahulu."
+        )
