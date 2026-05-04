@@ -270,13 +270,15 @@ def build_optimizer(
     if crf_params:
         param_groups.append({"params": crf_params, "lr": 5e-3})
 
-    optimizer = torch.optim.AdamW(param_groups, weight_decay=0.01)
+    # Increased L2 regularization (weight_decay) to prevent overfitting
+    optimizer = torch.optim.AdamW(param_groups, weight_decay=0.05)
 
     log(
         domain="Train",
         msg=f"Optimizer: Layer-wise Learning Rate Decay aktif | "
         f"{len(other_params)} other params (lr=1e-3) | "
-        f"{len(crf_params)} CRF params (lr=5e-3)",
+        f"{len(crf_params)} CRF params (lr=5e-3) | "
+        f"L2 weight_decay=0.05",
         level=log_level.INFO,
     )
 
@@ -531,7 +533,9 @@ def train_model(
     total_steps = epochs * len(train_loader)
     scheduler = build_scheduler(optimizer, total_steps)
 
+    best_metric_score = float("inf")  # Combined metric (lower is better)
     best_val_loss = float("inf")
+    best_val_acc = 0.0
     no_improve_count = 0  # counter untuk early stopping
 
     for epoch in range(1, epochs + 1):
@@ -550,14 +554,25 @@ def train_model(
             level=log_level.INFO,
         )
 
-        if val_loss < best_val_loss:
+        # Multi-metric early stopping: combine loss and accuracy
+        # Normalize metrics: higher accuracy is better, lower loss is better
+        normalized_loss = val_loss / best_val_loss if best_val_loss != float("inf") else val_loss
+        normalized_acc = 1.0 - acc  # Convert to "error" metric
+        
+        # Weighted combination: 60% loss, 40% accuracy
+        # This balances convergence with peak accuracy
+        metric_score = 0.6 * normalized_loss + 0.4 * normalized_acc
+        
+        if metric_score < best_metric_score:
+            best_metric_score = metric_score
             best_val_loss = val_loss
+            best_val_acc = acc
             no_improve_count = 0
             Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), checkpoint_path)
             log(
                 domain="Train",
-                msg=f"Checkpoint saved → {checkpoint_path}",
+                msg=f"Checkpoint saved → {checkpoint_path} (metric={metric_score:.4f})",
                 level=log_level.INFO,
             )
         else:
@@ -572,7 +587,7 @@ def train_model(
                 log(
                     domain="Train",
                     msg=f"Early stopping triggered at epoch {epoch}. "
-                    f"Best val loss: {best_val_loss:.4f}",
+                    f"Best val loss: {best_val_loss:.4f}, Best val acc: {acc:.4f}",
                     level=log_level.INFO,
                 )
                 break
@@ -581,6 +596,6 @@ def train_model(
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     log(
         domain="Train",
-        msg=f"Training selesai. Best val loss: {best_val_loss:.4f}",
+        msg=f"Training selesai. Best val loss: {best_val_loss:.4f}, Best val acc: {best_val_acc:.4f}",
         level=log_level.INFO,
     )

@@ -6,6 +6,34 @@ from torch import Tensor
 from transformers import PreTrainedModel
 
 
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for handling class imbalance.
+    Focuses training on hard, misclassified examples.
+    
+    Paper: Lin et al., "Focal Loss for Dense Object Detection"
+    https://arxiv.org/abs/1708.02002
+    """
+    def __init__(self, alpha: float = 1.0, gamma: float = 2.0) -> None:
+        super().__init__()
+        self.alpha = alpha  # Balancing factor
+        self.gamma = gamma  # Focusing parameter (higher = more focus on hard examples)
+    
+    def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
+        """
+        Args:
+            logits: (B, num_classes) - raw model outputs
+            targets: (B,) - target class indices
+        
+        Returns:
+            Scalar loss value (mean across batch)
+        """
+        ce_loss = F.cross_entropy(logits, targets, reduction='none')
+        pt = torch.exp(-ce_loss)  # Probability of true class
+        focal_loss = self.alpha * ((1 - pt) ** self.gamma) * ce_loss
+        return focal_loss.mean()
+
+
 class CharCNN(nn.Module):
     def __init__(
         self,
@@ -331,13 +359,18 @@ class HybridModel(nn.Module):
                 bidirectional=True,
             )
 
-        # classifier head
+        # classifier head with higher dropout
+        self.dropout_final = nn.Dropout(0.4)
         self.classifier = nn.Linear(fusion_dim, num_classes)
 
         if use_crf:
             self.crf = CRF(num_classes)
 
-        # CE loss dengan class weighting untuk handle imbalance.
+        # Loss functions
+        # 1. Focal Loss for handling class imbalance (hard examples)
+        self.focal_loss = FocalLoss(alpha=1.0, gamma=2.0)
+        
+        # 2. CE loss with class weighting for balanced learning
         # ignore_index=-100 otomatis mengecualikan non-first subword & special tokens.
         self.ce_loss = nn.CrossEntropyLoss(
             weight=class_weights,
@@ -417,6 +450,8 @@ class HybridModel(nn.Module):
                 packed_out, batch_first=True, total_length=S_word
             )
 
+        # Apply final dropout before classifier
+        x = self.dropout_final(x)
         emissions = self.classifier(x)  # (B, S_word, num_classes)
 
         # Jika word_mask tidak diberikan (saat inference di luar train/val), buat sendiri
@@ -429,23 +464,29 @@ class HybridModel(nn.Module):
                 safe_labels = labels.clamp(min=0, max=self.crf.num_tags - 1)
                 crf_loss = self.crf(emissions, safe_labels, word_mask)
 
-                # --- CE Loss (auxiliary) ---
+                # --- Focal Loss + CE Loss (auxiliary) ---
                 active_loss = word_mask.view(-1)
                 active_logits = emissions.view(-1, emissions.shape[-1])[active_loss]
                 active_labels = labels.view(-1)[active_loss]
+                
+                focal_loss = self.focal_loss(active_logits, active_labels)
                 ce_loss = self.ce_loss(active_logits, active_labels)
 
-                # Hybrid loss dengan pembobotan (alpha)
-                alpha = 0.7
-
-                return (alpha * crf_loss) + ((1 - alpha) * ce_loss)
+                # Hybrid loss dengan triple weighting
+                # - CRF untuk structural constraints (60%)
+                # - Focal untuk hard examples (25%)
+                # - CE untuk balanced learning (15%)
+                return 0.6 * crf_loss + 0.25 * focal_loss + 0.15 * ce_loss
             else:
-                # Baseline: CE murni (IndoBERT + Linear)
+                # Baseline: Focal + CE (IndoBERT + Linear)
                 active_loss = word_mask.view(-1)
                 active_logits = emissions.view(-1, emissions.shape[-1])[active_loss]
                 active_labels = labels.view(-1)[active_loss]
 
-                return self.ce_loss(active_logits, active_labels)
+                focal_loss = self.focal_loss(active_logits, active_labels)
+                ce_loss = self.ce_loss(active_logits, active_labels)
+                
+                return 0.4 * focal_loss + 0.6 * ce_loss
 
         else:
             if self.use_crf:

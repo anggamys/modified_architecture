@@ -150,6 +150,24 @@ def pos_collate_fn(
     }
 
 
+def get_all_labels_from_dataset(dataset: "POSDataset") -> List[int]:
+    """
+    Extract all class labels from dataset for stratified sampling.
+    
+    Args:
+        dataset: POSDataset instance
+    
+    Returns:
+        List of all labels (flattened across all sentences)
+    """
+    all_labels = []
+    for sent_df in dataset.sentences:
+        pos_tags = sent_df["pos_tag"].tolist()
+        labels = [dataset.class_to_idx.get(tag, 0) for tag in pos_tags]
+        all_labels.extend(labels)
+    return all_labels
+
+
 def make_collate_fn(pad_token_id: int) -> Callable:
     """
     Factory function untuk membuat collate_fn dengan pad_token_id yang spesifik.

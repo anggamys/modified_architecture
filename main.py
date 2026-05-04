@@ -4,10 +4,10 @@ import os
 import pandas as pd
 import torch
 import yaml
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from transformers import AutoModel, AutoTokenizer
 
-from dataset import POSDataset, make_collate_fn
+from dataset import POSDataset, make_collate_fn, get_all_labels_from_dataset
 from feature_extraction import HybridModel
 from preprocess import (
     build_char_vocab,
@@ -152,10 +152,29 @@ def main(
     val_dataset = POSDataset(val_df, char_vocab, class_to_idx, tokenizer)
     test_dataset = POSDataset(test_df, char_vocab, class_to_idx, tokenizer)
 
+    # Stratified batch sampling: compute sample weights from training labels
+    train_labels = get_all_labels_from_dataset(train_dataset)
+    class_counts = {}
+    for label in train_labels:
+        class_counts[label] = class_counts.get(label, 0) + 1
+    
+    # Calculate weight for each sample: weight = 1 / class_frequency
+    sample_weights = []
+    for label in train_labels:
+        weight = 1.0 / class_counts[label]
+        sample_weights.append(weight)
+    
+    # Create weighted sampler for balanced batch sampling
+    sampler = WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(train_labels),
+        replacement=True
+    )
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        sampler=sampler,  # Use stratified sampler instead of shuffle
         collate_fn=collate_fn,
         num_workers=0,
         pin_memory=(device == "cuda"),
