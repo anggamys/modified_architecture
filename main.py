@@ -153,21 +153,32 @@ def main(
     test_dataset = POSDataset(test_df, char_vocab, class_to_idx, tokenizer)
 
     # Stratified batch sampling: compute sample weights from training labels
+    # Get token-level labels to compute class frequencies
     train_labels = get_all_labels_from_dataset(train_dataset)
     class_counts = {}
     for label in train_labels:
         class_counts[label] = class_counts.get(label, 0) + 1
     
-    # Calculate weight for each sample: weight = 1 / class_frequency
-    sample_weights = []
-    for label in train_labels:
-        weight = 1.0 / class_counts[label]
-        sample_weights.append(weight)
+    # Compute sentence-level weights based on most frequent class in each sentence
+    # This ensures all sentences get balanced representation
+    sentence_weights = []
+    for sent_df in train_dataset.sentences:
+        pos_tags = sent_df["pos_tag"].tolist()
+        # Get labels for this sentence
+        sent_labels = [train_dataset.class_to_idx.get(tag, 0) for tag in pos_tags]
+        
+        # Use minimum weight (inverse frequency) across all labels in sentence
+        # This ensures sentences with rare classes get higher weight
+        if sent_labels:
+            sent_weights = [1.0 / class_counts[label] for label in sent_labels]
+            sentence_weights.append(max(sent_weights))  # Use max weight for the sentence
+        else:
+            sentence_weights.append(1.0)
     
-    # Create weighted sampler for balanced batch sampling
+    # Create weighted sampler for balanced batch sampling (sentence-level)
     sampler = WeightedRandomSampler(
-        weights=sample_weights,
-        num_samples=len(train_labels),
+        weights=sentence_weights,
+        num_samples=len(sentence_weights),
         replacement=True
     )
 
