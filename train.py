@@ -556,13 +556,15 @@ def train_model(
 
         # Multi-metric early stopping: combine loss and accuracy
         # Normalize metrics: higher accuracy is better, lower loss is better
-        normalized_loss = val_loss / best_val_loss if best_val_loss != float("inf") else val_loss
+        normalized_loss = (
+            val_loss / best_val_loss if best_val_loss != float("inf") else val_loss
+        )
         normalized_acc = 1.0 - acc  # Convert to "error" metric
-        
+
         # Weighted combination: 60% loss, 40% accuracy
         # This balances convergence with peak accuracy
         metric_score = 0.6 * normalized_loss + 0.4 * normalized_acc
-        
+
         if metric_score < best_metric_score:
             best_metric_score = metric_score
             best_val_loss = val_loss

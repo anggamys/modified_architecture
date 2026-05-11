@@ -10,25 +10,26 @@ class FocalLoss(nn.Module):
     """
     Focal Loss for handling class imbalance.
     Focuses training on hard, misclassified examples.
-    
+
     Paper: Lin et al., "Focal Loss for Dense Object Detection"
     https://arxiv.org/abs/1708.02002
     """
+
     def __init__(self, alpha: float = 1.0, gamma: float = 2.0) -> None:
         super().__init__()
         self.alpha = alpha  # Balancing factor
         self.gamma = gamma  # Focusing parameter (higher = more focus on hard examples)
-    
+
     def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
         """
         Args:
             logits: (B, num_classes) - raw model outputs
             targets: (B,) - target class indices
-        
+
         Returns:
             Scalar loss value (mean across batch)
         """
-        ce_loss = F.cross_entropy(logits, targets, reduction='none')
+        ce_loss = F.cross_entropy(logits, targets, reduction="none")
         pt = torch.exp(-ce_loss)  # Probability of true class
         focal_loss = self.alpha * ((1 - pt) ** self.gamma) * ce_loss
         return focal_loss.mean()
@@ -369,7 +370,7 @@ class HybridModel(nn.Module):
         # Loss functions
         # 1. Focal Loss for handling class imbalance (hard examples)
         self.focal_loss = FocalLoss(alpha=1.0, gamma=2.0)
-        
+
         # 2. CE loss with class weighting for balanced learning
         # ignore_index=-100 otomatis mengecualikan non-first subword & special tokens.
         self.ce_loss = nn.CrossEntropyLoss(
@@ -468,7 +469,7 @@ class HybridModel(nn.Module):
                 active_loss = word_mask.view(-1)
                 active_logits = emissions.view(-1, emissions.shape[-1])[active_loss]
                 active_labels = labels.view(-1)[active_loss]
-                
+
                 focal_loss = self.focal_loss(active_logits, active_labels)
                 ce_loss = self.ce_loss(active_logits, active_labels)
 
@@ -485,7 +486,7 @@ class HybridModel(nn.Module):
 
                 focal_loss = self.focal_loss(active_logits, active_labels)
                 ce_loss = self.ce_loss(active_logits, active_labels)
-                
+
                 return 0.4 * focal_loss + 0.6 * ce_loss
 
         else:
