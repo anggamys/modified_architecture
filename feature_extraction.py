@@ -43,7 +43,7 @@ class CharCNN(nn.Module):
         num_filters: int = 96,
         kernel_sizes: tuple[int, ...] = (2, 3, 4, 5),
         output_dim: int = 128,
-        dropout: float = 0.20,
+        dropout: float = 0.35,
     ) -> None:
         super().__init__()
 

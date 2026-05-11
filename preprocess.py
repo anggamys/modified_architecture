@@ -274,14 +274,14 @@ def calculate_class_weights(labels: pd.Series, smooth: float = 1.0) -> Dict[str,
         weight = total_samples / (len(labels.unique()) * class_count)
         weights[class_label] = weight
 
-    # Normalize ke range [0.5, 2.5] untuk stability dengan slight boost pada rare classes
+    # Normalize ke range [0.5, 2.0] untuk stability
     min_weight = min(weights.values())
     max_weight = max(weights.values())
 
     if max_weight > min_weight:
         for cls in weights:
             weights[cls] = (
-                0.5 + (weights[cls] - min_weight) / (max_weight - min_weight) * 2.0
+                0.5 + (weights[cls] - min_weight) / (max_weight - min_weight) * 1.5
             )
 
     # Log calculated weights (joined into single line)

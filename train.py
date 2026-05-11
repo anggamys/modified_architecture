@@ -288,7 +288,7 @@ def build_optimizer(
 def build_scheduler(
     optimizer: torch.optim.Optimizer,
     num_training_steps: int,
-    warmup_ratio: float = 0.15,
+    warmup_ratio: float = 0.1,
 ) -> Any:
     num_warmup_steps = int(warmup_ratio * num_training_steps)
 
