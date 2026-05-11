@@ -7,7 +7,11 @@ markdown/
 raw_corpora/
 raw_corpora_wa/
 training_result/
+eda_output/
 
 # Python built-in cache
 __pycache__/
 *.pyc
+
+# Copilot generated files
+*.md
