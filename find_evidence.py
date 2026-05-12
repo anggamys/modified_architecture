@@ -1,6 +1,22 @@
 import json
 import argparse
 import os
+import glob
+
+def resolve_model_path(base_dir, model_name, filename_template):
+    """Resolve path to model data, checking base dir and drive subfolders."""
+    # 1. Try direct path
+    direct_path = os.path.join(base_dir, filename_template.format(model_name.lower()))
+    if os.path.exists(direct_path):
+        return direct_path
+        
+    # 2. Try drive subfolders
+    drive_pattern = os.path.join(base_dir, f"drive*-{model_name.lower()}", filename_template.format(model_name.lower()))
+    matches = glob.glob(drive_pattern)
+    if matches:
+        return matches[0]
+        
+    return direct_path # Fallback to original expected path
 
 def load_json(path):
     if not os.path.exists(path):
@@ -145,9 +161,20 @@ def find_evidence(m4_path, m6_path, m1_path=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Find qualitative evidence comparing M4 and M6 predictions.")
-    parser.add_argument("--m4_path", default="training_result/test_results_m4.json", help="Path to M4 test results JSON")
-    parser.add_argument("--m6_path", default="training_result/test_results_m6.json", help="Path to M6 test results JSON")
-    parser.add_argument("--m1_path", default="training_result/test_results_m1.json", help="Path to M1 test results JSON")
+    parser.add_argument("--base_dir", default="training_result", help="Base directory for training results")
+    parser.add_argument("--m4_path", help="Path to M4 test results JSON (optional, will be resolved if not provided)")
+    parser.add_argument("--m6_path", help="Path to M6 test results JSON (optional, will be resolved if not provided)")
+    parser.add_argument("--m1_path", help="Path to M1 test results JSON (optional, will be resolved if not provided)")
     args = parser.parse_args()
     
-    find_evidence(args.m4_path, args.m6_path, args.m1_path)
+    # Resolve paths if not explicitly provided
+    m4_path = args.m4_path or resolve_model_path(args.base_dir, "m4", "test_results_{}.json")
+    m6_path = args.m6_path or resolve_model_path(args.base_dir, "m6", "test_results_{}.json")
+    m1_path = args.m1_path or resolve_model_path(args.base_dir, "m1", "test_results_{}.json")
+    
+    print("Menggunakan data:")
+    print(f"  M1: {m1_path}")
+    print(f"  M4: {m4_path}")
+    print(f"  M6: {m6_path}")
+    
+    find_evidence(m4_path, m6_path, m1_path)

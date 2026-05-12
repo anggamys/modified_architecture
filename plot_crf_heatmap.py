@@ -3,7 +3,51 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import argparse
 import os
-from typing import Optional
+import glob
+
+# Research-ready Premium Grayscale style
+plt.rcParams.update({
+    "figure.facecolor":  "#ffffff",
+    "axes.facecolor":    "#ffffff",
+    "axes.edgecolor":    "#333333",
+    "axes.labelcolor":   "#000000",
+    "axes.titlesize":    16,
+    "axes.titleweight":  "bold",
+    "axes.labelsize":    12,
+    "xtick.color":       "#333333",
+    "ytick.color":       "#333333",
+    "xtick.labelsize":   10,
+    "ytick.labelsize":   10,
+    "grid.color":        "#dddddd",
+    "grid.linewidth":    0.8,
+    "grid.linestyle":    "--",
+    "legend.fontsize":   10,
+    "legend.frameon":    True,
+    "legend.edgecolor":  "#333333",
+    "font.family":       "sans-serif",
+    "font.sans-serif":   ["Arial", "DejaVu Sans", "Helvetica"],
+    "savefig.dpi":       300, 
+    "savefig.bbox":      "tight",
+    "axes.spines.top":   False,
+    "axes.spines.right": False,
+})
+
+def resolve_m6_csv(base_dir):
+    """Try to find the CRF transitions CSV for model M6."""
+    # 1. Try direct path
+    direct_path = os.path.join(base_dir, "crf_transitions_m6.csv")
+    if os.path.exists(direct_path):
+        return direct_path
+    
+    # 2. Try drive subfolder
+    drive_pattern = os.path.join(base_dir, "drive*-m6", "crf_transitions_m6.csv")
+    matches = glob.glob(drive_pattern)
+    if matches:
+        return matches[0]
+        
+    # 3. Fallback to default name if M6 specific not found
+    fallback_path = os.path.join(base_dir, "crf_transitions.csv")
+    return fallback_path
 
 def plot_heatmap(csv_path: str, output_png: str = "heatmap_crf.png") -> None:
     print(f"Memuat data dari: {csv_path}")
@@ -28,16 +72,20 @@ def plot_heatmap(csv_path: str, output_png: str = "heatmap_crf.png") -> None:
         df_filtered = df_loaded.loc[valid_tags, valid_tags]
 
     # 3. Buat Heatmap
-    plt.figure(figsize=(10, 8))
-    # annot=True untuk menampilkan angka, cmap="Greys" untuk warna hitam putih
-    sns.heatmap(df_filtered, annot=True, fmt=".2f", cmap="Greys", cbar=True)
+    plt.figure(figsize=(12, 10))
+    
+    # anot=True untuk menampilkan angka, cmap="Greys" untuk warna hitam putih
+    # Tambahkan garis antar sel untuk estetika premium
+    sns.heatmap(df_filtered, annot=True, fmt=".2f", cmap="Greys", 
+                cbar=True, linewidths=.5, linecolor='lightgray',
+                annot_kws={"size": 9, "weight": "bold"})
 
-    plt.title("CRF Transition Matrix (Internal Weights)", fontsize=14)
-    plt.xlabel("To Tag", fontsize=12)
-    plt.ylabel("From Tag", fontsize=12)
+    plt.title("CRF Transition Matrix - Model M6 (Internal Weights)", pad=20)
+    plt.xlabel("To Tag", labelpad=15)
+    plt.ylabel("From Tag", labelpad=15)
 
-    # 4. Simpan langsung sebagai gambar PNG resolusi tinggi (Syarat jurnal/MIT Press)
-    plt.savefig(output_png, dpi=300, bbox_inches='tight')
+    # Simpan langsung sebagai gambar PNG resolusi tinggi
+    plt.savefig(output_png)
     print(f"\nHeatmap berhasil disimpan sebagai: {output_png}")
     
     # Tampilkan plot (Jika dijalankan di lokal/Jupyter)
@@ -49,8 +97,11 @@ def plot_heatmap(csv_path: str, output_png: str = "heatmap_crf.png") -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot Heatmap untuk CRF Transition Matrix")
-    parser.add_argument("--csv_path", type=str, default="training_result/crf_transitions.csv", help="Path ke file CSV matriks transisi")
-    parser.add_argument("--output_png", type=str, default="analyst/heatmap_crf.png", help="Path output file PNG resolusi tinggi")
+    parser.add_argument("--base_dir", type=str, default="training_result", help="Folder utama training result")
+    parser.add_argument("--csv_path", type=str, help="Path ke file CSV (opsional, akan dicari otomatis jika kosong)")
+    parser.add_argument("--output_png", type=str, default="analyst/heatmap_crf_m6.png", help="Path output file PNG")
     args = parser.parse_args()
     
-    plot_heatmap(args.csv_path, args.output_png)
+    csv_path = args.csv_path or resolve_m6_csv(args.base_dir)
+    
+    plot_heatmap(csv_path, args.output_png)

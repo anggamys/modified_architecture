@@ -1,5 +1,23 @@
 import json
 import re
+import os
+import glob
+import argparse
+
+def resolve_model_path(base_dir, model_name, filename_template):
+    """Resolve path to model data, checking base dir and drive subfolders."""
+    # 1. Try direct path
+    direct_path = os.path.join(base_dir, filename_template.format(model_name.lower()))
+    if os.path.exists(direct_path):
+        return direct_path
+        
+    # 2. Try drive subfolders
+    drive_pattern = os.path.join(base_dir, f"drive*-{model_name.lower()}", filename_template.format(model_name.lower()))
+    matches = glob.glob(drive_pattern)
+    if matches:
+        return matches[0]
+        
+    return direct_path # Fallback to original expected path
 
 def explore_data(filepath):
     print(f"Membaca data dari: {filepath}")
@@ -61,6 +79,14 @@ def explore_data(filepath):
         print(f"Token: {p['token']:<20} | True: {p['true_label']:<8} | Pred: {p['pred_label']}")
 
 if __name__ == "__main__":
-    # Sesuaikan dengan path file json Anda
-    filepath = 'training_result/test_results.json'
+    parser = argparse.ArgumentParser(description="Explore prediction errors in model results.")
+    parser.add_argument("--base_dir", default="training_result", help="Base directory for results")
+    parser.add_argument("--model", default="m6", help="Model name (e.g., m1, m4, m6)")
+    parser.add_argument("--filepath", help="Direct path to json file (optional)")
+    
+    args = parser.parse_args()
+    
+    # Resolve path if not explicitly provided
+    filepath = args.filepath or resolve_model_path(args.base_dir, args.model, "test_results_{}.json")
+    
     explore_data(filepath)
