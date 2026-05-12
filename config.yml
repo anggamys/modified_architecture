@@ -34,3 +34,19 @@ M6:
   model_name: 'dafqi/IndoBertTweet'
   char_type: 'bilstm'
   use_crf: true
+
+# ─── Skenario Kontrol Ablasi (Merespons Critique 4: Konfusio Konfigurasional) ───
+# Dua skenario ini ditambahkan untuk mengisolasi kontribusi encoder (IndoBERTweet)
+# dan character extractor (BiLSTM vs CNN) secara independen.
+
+M6a:
+  description: 'Kontrol Ablasi: IndoBERTweet + Char-CNN + CRF (Isolasi encoder vs M4; isolasi char-extractor vs M6)'
+  model_name: 'dafqi/IndoBertTweet'
+  char_type: 'cnn'
+  use_crf: true
+
+M6b:
+  description: 'Kontrol Ablasi: IndoBERTweet + Tanpa Char + CRF (Isolasi efek char-level features pada IndoBERTweet)'
+  model_name: 'dafqi/IndoBertTweet'
+  char_type: 'none'
+  use_crf: true
