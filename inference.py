@@ -668,33 +668,6 @@ def parse_args() -> argparse.Namespace:
         help="Batas jumlah kalimat per file output (aktif hanya jika --split_by=rows)",
     )
 
-    parser.add_argument(
-        "--limit", type=int, default=0, help="Batas jumlah kalimat (0 = semua)"
-    )
-
-    parser.add_argument(
-        "--min_words", type=int, default=2, help="Minimum jumlah kata per kalimat"
-    )
-
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=32,
-        help="Jumlah kalimat per batch GPU (naikkan jika VRAM masih longgar, turunkan jika OOM)",
-    )
-
-    parser.add_argument(
-        "--split_by",
-        type=str,
-        default="file",
-        choices=["file", "rows", "none"],
-        help=(
-            "Strategi pemecahan output CSV. "
-            "'file' = 1 CSV per file sumber (default). "
-            "'rows' = pecah per N kalimat (lihat --rows_per_file). "
-            "'none' = satu file tunggal."
-        ),
-    )
 
     return parser.parse_args()
 
