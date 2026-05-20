@@ -45,15 +45,28 @@ def save_test_results(
     token_indices: list[int] | None = None,
 ) -> pd.DataFrame:
     """
-    Simpan hasil test (token, true label, predicted label) untuk analisis confusion matrix.
+    Simpan hasil test (token, true label, predicted label) untuk analisis.
+
+    Output files:
+    1. {output_path}.csv
+       - Token-level predictions dengan ground truth untuk confusion matrix
+       - Kolom: [sentence_id?, token_idx?, token, true_label, pred_label, correct, true_idx, pred_idx]
+       - Digunakan untuk error analysis dan model debugging
+
+    2. {output_path}.json
+       - Structured format dengan sentence grouping untuk interpretability
+       - Kolom: sentence_id → tokens list dengan [token, true_label, pred_label, correct]
+       - Untuk visualization dan detailed analysis
 
     Args:
         tokens: List of tokens
-        preds: List of predicted class indices
-        labels: List of true label indices
-        idx_to_class: Mapping dari index ke class name
-        output_path: Path untuk menyimpan file
+        preds: List of predicted class indices (0-based, dari model output)
+        labels: List of true label indices (0-based, dari ground truth)
+        idx_to_class: Mapping dari index ke class name (e.g., {0: 'NN', 1: 'VB', ...})
+        output_path: Path untuk menyimpan file (tanpa extension)
         format_type: Format penyimpanan ('csv', 'json', 'both')
+        sent_indices: List of sentence indices untuk setiap token (opsional)
+        token_indices: List of token indices dalam sentence (opsional)
     """
 
     # Validasi input
@@ -459,14 +472,37 @@ def evaluate_with_tokens(
     """
     Evaluate model dan track tokens untuk analisis confusion matrix.
 
+    Digunakan di main.py setelah training untuk evaluate test set dan collect
+    token-level predictions untuk save_test_results().
+
     Args:
-        model: Model untuk evaluation
-        dataloader: DataLoader
-        dataset: POSDataset instance untuk extract tokens
+        model: Model untuk evaluation (sudah di-restore ke best checkpoint)
+        dataloader: Test DataLoader
+        dataset: POSDataset instance untuk extract tokens dalam urutan yang benar
         device: Device (cuda/cpu)
 
     Returns:
-        Tuple of (avg_loss, tokens, preds, labels, sent_indices, token_indices)
+        Tuple of (avg_loss, tokens, preds, labels, sent_indices, token_indices):
+        - avg_loss: Average test loss
+        - tokens: List of tokens dalam order (diambil dari dataset.sentences)
+        - preds: List of predicted class indices (hasil model.forward() tanpa labels)
+        - labels: List of true label indices (dari batch["labels"])
+        - sent_indices: Sentence ID untuk setiap token (untuk grouping di output)
+        - token_indices: Token index dalam sentence (untuk sequencing di output)
+
+    Used by main.py:
+        test_loss, test_tokens, test_preds, test_labels, sent_indices, token_indices = (
+            evaluate_with_tokens(model, test_loader, test_dataset, device)
+        )
+        save_test_results(
+            tokens=test_tokens,
+            preds=test_preds,
+            labels=test_labels,
+            idx_to_class=idx_to_class,
+            output_path=test_results_path,
+            sent_indices=sent_indices,
+            token_indices=token_indices,
+        )
     """
     # Extract tokens dalam urutan yang sesuai
     tokens, sent_indices, token_indices = extract_tokens_from_dataset(dataset)
@@ -528,6 +564,33 @@ def train_model(
     patience: int = 3,
     checkpoint_path: str = "best_model.pt",
 ) -> None:
+    """
+    Train model dengan early stopping berdasarkan validation loss & accuracy.
+
+    CHECKPOINT MANAGEMENT:
+    - Menyimpan best checkpoint berdasarkan combined metric (0.6*loss + 0.4*error)
+    - Sebelum return: restore model ke best checkpoint state_dict
+    - Digunakan di main.py sebelum evaluate test set
+
+    Args:
+        model: PyTorch model untuk training (akan di-modify in-place dengan best weights)
+        train_loader: Training DataLoader
+        val_loader: Validation DataLoader  
+        device: Device untuk training
+        epochs: Maksimal training epochs
+        patience: Early stopping patience (epochs tanpa improvement)
+        checkpoint_path: Path untuk menyimpan best checkpoint (e.g., outputs/M6/best_model_m6.pt)
+
+    Workflow di main.py:
+        1. train_model(model, train_loader, val_loader, device, ...)
+           → Model weights di-restore ke best checkpoint
+
+        2. test_loss, ... = evaluate_with_tokens(model, test_loader, test_dataset, device)
+           → Evaluate best model pada test set
+
+        3. torch.save(model.state_dict(), ...)
+           → Save best model weights ke outputs/{config_name}/best_model_{config_name}.pt
+    """
     optimizer = build_optimizer(model)
 
     total_steps = epochs * len(train_loader)

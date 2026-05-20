@@ -3,6 +3,7 @@ import json
 import argparse
 from pathlib import Path
 
+import yaml
 import torch
 import numpy as np
 import pandas as pd
@@ -165,6 +166,40 @@ def load_model(
     char_type: str = "cnn",
     use_crf: bool = True,
 ) -> tuple[HybridModel, dict[str, int], dict[int, str], PreTrainedTokenizerBase]:
+    """
+    Load trained model dan dependencies untuk inference.
+
+    Input files (dari training output):
+    1. model_path (e.g., outputs/M6/best_model_m6.pt)
+       - Model state_dict (weights) dari train.py → main.py
+       - Dimuat ke model architecture yang di-instantiate di sini
+
+    2. vocab_path (e.g., outputs/M6/char_vocab_m6.json)
+       - Character vocabulary dari main.py
+       - Format: {char: integer_id, ...}
+       - Digunakan di run_inference() untuk prepare_char_ids()
+
+    3. mapping_path (e.g., outputs/M6/class_mappings_m6.json)
+       - Class ↔ Index mapping dari main.py
+       - Format: {"class_to_idx": {tag: idx}, "idx_to_class": {idx: tag}}
+       - Digunakan di _decode_preds() untuk convert predictions → tag names
+
+    Args:
+        model_path: Path ke saved model weights (.pt file)
+        vocab_path: Path ke char_vocab.json
+        mapping_path: Path ke class_mappings.json
+        model_name: HuggingFace BERT model identifier
+        device: Device untuk inference (cuda/cpu)
+        char_type: Character extractor type ('none', 'cnn', 'bilstm')
+        use_crf: Whether CRF layer was used during training
+
+    Returns:
+        Tuple of (model, char_vocab, idx_to_class, tokenizer):
+        - model: HybridModel instance dengan loaded weights
+        - char_vocab: Dictionary {char → id}
+        - idx_to_class: Dictionary {id → tag_name}
+        - tokenizer: BERT tokenizer untuk subword tokenization
+    """
     with open(vocab_path, "r", encoding="utf-8") as f:
         char_vocab: dict[str, int] = json.load(f)
 
@@ -328,6 +363,45 @@ def run_inference(
     split_by: str = "file",  # "file" | "rows" | "none"
     rows_per_file: int = 500_000,  # aktif hanya jika split_by="rows"
 ) -> int:
+    """
+    Run inference pada unlabeled corpus dan simpan pseudo-labels ke CSV.
+
+    PROCESS:
+    1. Tokenisasi kalimat dengan BERT tokenizer
+    2. Prepare char-level features menggunakan char_vocab
+    3. Forward melalui model (char + BERT + optional CRF)
+    4. Decode predictions → POS tag names menggunakan idx_to_class
+    5. Simpan token-level predictions ke CSV dengan kolom:
+       - file_id: Source file identifier
+       - sentence_id: Global sentence number (1-indexed)
+       - token_index: Token position dalam sentence (1-indexed)
+       - token: Actual word token
+       - pos_tag_pred: Predicted POS tag (dari idx_to_class)
+       - pos_tag_koreksi: Empty column untuk manual correction
+
+    OUTPUT FILES:
+    - split_by="none": {output_path} (single file)
+    - split_by="file": {output_dir}/{stem}_files/{stem}_{file_id}.csv
+    - split_by="rows": {output_dir}/{stem}_parts/{stem}_part###.csv
+
+    Args:
+        sentences: List of (file_id, sentence_text) tuples dari load_corpus_from_folder()
+        model: Loaded HybridModel for inference
+        char_vocab: Character vocabulary dari load_model()
+        idx_to_class: POS tag index mapping dari load_model()
+        tokenizer: BERT tokenizer dari load_model()
+        device: Device untuk inference (cuda/cpu)
+        output_path: Output CSV path
+        batch_size: Batch size untuk GPU inference
+        max_word_len: Max character count per word for char-level features
+        log_every: Log progress every N sentences
+        flush_every: Flush buffer to CSV every N tokens
+        split_by: Output splitting strategy
+        rows_per_file: Rows per file jika split_by="rows"
+
+    Returns:
+        Total number of tokens written to output files
+    """
     total = len(sentences)
     total_tokens = 0
     buffer: list[dict] = []
@@ -465,40 +539,71 @@ def run_inference(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Pseudo-labeling inference pipeline")
+    parser = argparse.ArgumentParser(
+        description="Pseudo-labeling inference pipeline menggunakan model terlatih dari main.py",
+        epilog=(
+            "USAGE EXAMPLES:\n"
+            "  1. Dengan output paths dari training (config_name='M6'):\n"
+            "     python inference.py --config_name M6\n"
+            "  2. Dengan custom paths:\n"
+            "     python inference.py --model_path ./my_model.pt "
+            "--vocab_path ./my_vocab.json --mapping_path ./my_mapping.json\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--config_name",
+        type=str,
+        default="",
+        help=(
+            "Nama scenario dari training (M1-M6, M6a, M6b). "
+            "Jika diisi, akan otomatis load paths dari outputs/{config_name}/. "
+            "Contoh: --config_name M6 akan load outputs/M6/best_model_m6.pt, dll"
+        ),
+    )
+
     parser.add_argument(
         "--corpora_dir",
         type=str,
         default="./raw_corpora",
-        help="Folder berisi file .txt mentah",
+        help="Folder berisi file .txt mentah untuk pseudo-labeling",
     )
 
     parser.add_argument(
         "--model_path",
         type=str,
-        default="./best_model.pt",
-        help="Path ke checkpoint model (.pt)",
+        default="",
+        help=(
+            "Path ke checkpoint model (.pt). "
+            "Jika kosong, akan diambil dari outputs/{config_name}/best_model_{config_name_lower}.pt"
+        ),
     )
 
     parser.add_argument(
         "--vocab_path",
         type=str,
-        default="./char_vocab.json",
-        help="Path ke char_vocab.json (disimpan oleh main.py)",
+        default="",
+        help=(
+            "Path ke char_vocab.json (disimpan oleh main.py). "
+            "Jika kosong, akan diambil dari outputs/{config_name}/char_vocab_{config_name_lower}.json"
+        ),
     )
 
     parser.add_argument(
         "--mapping_path",
         type=str,
-        default="./class_mappings.json",
-        help="Path ke class_mappings.json (disimpan oleh main.py)",
+        default="",
+        help=(
+            "Path ke class_mappings.json (disimpan oleh main.py). "
+            "Jika kosong, akan diambil dari outputs/{config_name}/class_mappings_{config_name_lower}.json"
+        ),
     )
 
     parser.add_argument(
         "--model_name",
         type=str,
         default="indobenchmark/indobert-base-p1",
-        help="HuggingFace model name",
+        help="HuggingFace model name (e.g., indobenchmark/indobert-base-p1, dafqi/IndoBertTweet)",
     )
 
     parser.add_argument(
@@ -511,15 +616,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--char_type",
         type=str,
-        default="bilstm",
-        help="Tipe char extractor: 'none', 'cnn', atau 'bilstm'",
+        default="",
+        help=(
+            "Tipe char extractor: 'none', 'cnn', atau 'bilstm'. "
+            "Jika kosong dan --config_name diberikan, akan diambil dari konfigurasi scenario."
+        ),
     )
 
     parser.add_argument(
         "--use_crf",
         type=lambda x: str(x).lower() in ["true", "1", "yes"],
-        default=True,
-        help="Aktifkan modul CRF (default True)",
+        default=None,
+        help=(
+            "Aktifkan modul CRF. Jika tidak diberikan dan --config_name ada, "
+            "akan diambil dari konfigurasi scenario. Default=True jika config_name tidak ada."
+        ),
     )
 
     parser.add_argument(
@@ -557,6 +668,34 @@ def parse_args() -> argparse.Namespace:
         help="Batas jumlah kalimat per file output (aktif hanya jika --split_by=rows)",
     )
 
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Batas jumlah kalimat (0 = semua)"
+    )
+
+    parser.add_argument(
+        "--min_words", type=int, default=2, help="Minimum jumlah kata per kalimat"
+    )
+
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=32,
+        help="Jumlah kalimat per batch GPU (naikkan jika VRAM masih longgar, turunkan jika OOM)",
+    )
+
+    parser.add_argument(
+        "--split_by",
+        type=str,
+        default="file",
+        choices=["file", "rows", "none"],
+        help=(
+            "Strategi pemecahan output CSV. "
+            "'file' = 1 CSV per file sumber (default). "
+            "'rows' = pecah per N kalimat (lihat --rows_per_file). "
+            "'none' = satu file tunggal."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -564,6 +703,82 @@ def main() -> None:
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(domain="Main", msg=f"Device: {device}", level=log_level.INFO)
+
+    # --- Resolve paths berdasarkan config_name atau explicit paths ---
+    model_path = args.model_path
+    vocab_path = args.vocab_path
+    mapping_path = args.mapping_path
+    char_type = args.char_type
+    use_crf = args.use_crf
+
+    if args.config_name:
+        # Load dari outputs/{config_name}/
+        config_name_lower = args.config_name.lower()
+        output_dir = Path("outputs") / args.config_name
+
+        # Auto-resolve paths jika tidak di-explicit-kan
+        if not model_path:
+            model_path = str(output_dir / f"best_model_{config_name_lower}.pt")
+        if not vocab_path:
+            vocab_path = str(output_dir / f"char_vocab_{config_name_lower}.json")
+        if not mapping_path:
+            mapping_path = str(output_dir / f"class_mappings_{config_name_lower}.json")
+
+        # Load config scenario untuk char_type & use_crf jika belum explicit
+        try:
+            with open("config.yml", "r", encoding="utf-8") as f:
+                config_data = yaml.safe_load(f)
+
+            if args.config_name in config_data:
+                scenario = config_data[args.config_name]
+                log(
+                    domain="Main",
+                    msg=f"Memuat konfigurasi scenario [{args.config_name}]: {scenario.get('description', '')}",
+                    level=log_level.INFO,
+                )
+
+                if not char_type and "char_type" in scenario:
+                    char_type = scenario["char_type"]
+                if use_crf is None and "use_crf" in scenario:
+                    use_crf = scenario["use_crf"]
+            else:
+                log(
+                    domain="Main",
+                    msg=f"Peringatan: Scenario '{args.config_name}' tidak ditemukan di config.yml!",
+                    level=log_level.WARNING,
+                )
+        except Exception as e:
+            log(
+                domain="Main",
+                msg=f"Gagal membaca config.yml: {e}",
+                level=log_level.WARNING,
+            )
+
+    # --- Set defaults jika masih kosong ---
+    if not char_type:
+        char_type = "bilstm"
+    if use_crf is None:
+        use_crf = True
+
+    log(
+        domain="Main",
+        msg=f"Konfigurasi: char_type={char_type}, use_crf={use_crf}",
+        level=log_level.INFO,
+    )
+
+    # --- Validasi file paths ---
+    for fpath, fname in [
+        (model_path, "Model"),
+        (vocab_path, "Vocab"),
+        (mapping_path, "Class Mappings"),
+    ]:
+        if not Path(fpath).exists():
+            log(
+                domain="Main",
+                msg=f"ERROR: {fname} file tidak ditemukan: {fpath}",
+                level=log_level.ERROR,
+            )
+            return
 
     # 1. Baca corpora
     sentences = load_corpus_from_folder(
@@ -582,13 +797,13 @@ def main() -> None:
 
     # 2. Load model
     model, char_vocab, idx_to_class, tokenizer = load_model(
-        model_path=args.model_path,
-        vocab_path=args.vocab_path,
-        mapping_path=args.mapping_path,
+        model_path=model_path,
+        vocab_path=vocab_path,
+        mapping_path=mapping_path,
         model_name=args.model_name,
         device=device,
-        char_type=args.char_type,
-        use_crf=args.use_crf,
+        char_type=char_type,
+        use_crf=use_crf,
     )
 
     # 3. Inference + simpan inkremental ke CSV
@@ -605,6 +820,12 @@ def main() -> None:
         rows_per_file=args.rows_per_file,
     )
 
+    log(
+        domain="Main",
+        msg="Pipeline selesai. Output: "
+        f"{args.output} (atau folder {Path(args.output).parent / Path(args.output).stem}/ jika split)",
+        level=log_level.INFO,
+    )
     log(
         domain="Main",
         msg="Buka file pseudo labels, koreksi kolom 'pos_tag_koreksi', lalu gabungkan ke dataset training.",

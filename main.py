@@ -38,6 +38,50 @@ def main(
     use_word_bilstm: bool = False,
     config_name: str = "",
 ) -> None:
+    """
+    Train POS tagging model dengan arsitektur hybrid (BERT + Char-level + CRF).
+
+    Args:
+        data_path: Path ke CSV training data dengan kolom ['token', 'pos_tag']
+        model_name: HuggingFace model identifier (e.g., 'indobenchmark/indobert-base-p1')
+        epochs: Maksimal epoch training
+        patience: Early stopping patience (epochs tanpa improvement)
+        batch_size: Batch size untuk training
+        char_type: Tipe character extractor ('none', 'cnn', 'bilstm')
+        use_crf: Aktifkan CRF layer untuk decoding
+        use_word_bilstm: Aktifkan Word-level BiLSTM setelah subword pooling
+        config_name: Nama scenario (M1-M6, M6a, M6b) untuk naming output files
+
+    OUTPUT FILES (di folder outputs/{config_name}/ atau outputs/Custom/):
+        1. best_model_{config_name_lower}.pt
+           - Model weights checkpoint terbaik dari validation
+           - Untuk dimuat oleh inference.py via load_model()
+
+        2. char_vocab_{config_name_lower}.json
+           - Vocabulary mapping char → integer ID
+           - Format: {"char": id, ...}
+           - Diperlukan saat inference untuk prepare_char_ids()
+
+        3. class_mappings_{config_name_lower}.json
+           - Mapping POS tag ↔ class index
+           - Format: {"class_to_idx": {tag: idx, ...}, "idx_to_class": {idx: tag, ...}}
+           - Diperlukan saat inference untuk decode predictions
+
+        4. classification_report_{config_name_lower}.json
+           - Detailed classification metrics (precision, recall, F1) per POS tag
+           - Format: sklearn classification_report output
+           - Untuk analisis performa model
+
+        5. test_results_{config_name_lower}.csv/json
+           - Token-level predictions pada test set
+           - Kolom CSV: [sentence_id, token_idx, token, true_label, pred_label, correct, true_idx, pred_idx]
+           - Untuk confusion matrix dan error analysis
+
+        6. crf_transitions_{config_name_lower}.csv
+           - CRF learned transition scores antara POS tags
+           - Hanya jika use_crf=True
+           - Untuk analisis tag sequence patterns
+    """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(domain="Main", msg=f"Using device: {device}", level=log_level.INFO)
 
@@ -299,6 +343,67 @@ def main(
     log(
         domain="Main",
         msg=f"Semua file (Model, Vocab, Class Mapping) berhasil disimpan di folder: {output_dir}/",
+        level=log_level.INFO,
+    )
+
+    # --- Dokumentasi Workflow ---
+    log(
+        domain="Main",
+        msg="=" * 80,
+        level=log_level.INFO,
+    )
+    log(
+        domain="Main",
+        msg="WORKFLOW: TRAINING → INFERENCE",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Main",
+        msg="=" * 80,
+        level=log_level.INFO,
+    )
+    log(
+        domain="Main",
+        msg=f"1. Training selesai. Output tersimpan di: {output_dir}/",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Main",
+        msg=f"2. Untuk pseudo-labeling unlabeled corpus, jalankan inference.py:",
+        level=log_level.INFO,
+    )
+
+    if config_name:
+        log(
+            domain="Main",
+            msg=f"   python inference.py --config_name {config_name} "
+            f"--corpora_dir ./raw_corpora --output ./data_pseudo_label.csv",
+            level=log_level.INFO,
+        )
+    else:
+        log(
+            domain="Main",
+            msg=f"   python inference.py "
+            f"--model_path {os.path.join(output_dir, 'best_model_custom.pt')} "
+            f"--vocab_path {os.path.join(output_dir, 'char_vocab_custom.json')} "
+            f"--mapping_path {os.path.join(output_dir, 'class_mappings_custom.json')} "
+            f"--corpora_dir ./raw_corpora --output ./data_pseudo_label.csv",
+            level=log_level.INFO,
+        )
+
+    log(
+        domain="Main",
+        msg=f"3. Output inference: data_pseudo_label.csv (atau split files)",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Main",
+        msg=f"4. Koreksi kolom 'pos_tag_koreksi' → gabungkan ke dataset training",
+        level=log_level.INFO,
+    )
+    log(
+        domain="Main",
+        msg="=" * 80,
         level=log_level.INFO,
     )
 
