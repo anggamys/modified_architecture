@@ -602,7 +602,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model_name",
         type=str,
-        default="indobenchmark/indobert-base-p1",
+        default="",
         help="HuggingFace model name (e.g., indobenchmark/indobert-base-p1, dafqi/IndoBertTweet)",
     )
 
@@ -683,6 +683,7 @@ def main() -> None:
     mapping_path = args.mapping_path
     char_type = args.char_type
     use_crf = args.use_crf
+    model_name = args.model_name
 
     if args.config_name:
         # Load dari outputs/{config_name}/
@@ -714,6 +715,8 @@ def main() -> None:
                     char_type = scenario["char_type"]
                 if use_crf is None and "use_crf" in scenario:
                     use_crf = scenario["use_crf"]
+                if not model_name and "model_name" in scenario:
+                    model_name = scenario["model_name"]
             else:
                 log(
                     domain="Main",
@@ -732,10 +735,12 @@ def main() -> None:
         char_type = "bilstm"
     if use_crf is None:
         use_crf = True
+    if not model_name:
+        model_name = "indobenchmark/indobert-base-p1"
 
     log(
         domain="Main",
-        msg=f"Konfigurasi: char_type={char_type}, use_crf={use_crf}",
+        msg=f"Konfigurasi: model_name={model_name}, char_type={char_type}, use_crf={use_crf}",
         level=log_level.INFO,
     )
 
@@ -773,7 +778,7 @@ def main() -> None:
         model_path=model_path,
         vocab_path=vocab_path,
         mapping_path=mapping_path,
-        model_name=args.model_name,
+        model_name=model_name,
         device=device,
         char_type=char_type,
         use_crf=use_crf,
