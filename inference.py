@@ -7,6 +7,7 @@ import yaml
 import torch
 import numpy as np
 import pandas as pd
+# pyrefly: ignore [missing-import]
 from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizerBase
 
 from utils import log, log_level
@@ -148,9 +149,10 @@ def load_corpus_from_folder(
             domain="Main", msg=f"Dibatasi {limit} kalimat pertama", level=log_level.INFO
         )
 
+    total_tokens = sum(len(sent.split()) for _, sent in results)
     log(
         domain="Main",
-        msg=f"Total kalimat siap diinference: {len(results):,}",
+        msg=f"Total kalimat siap diinference: {len(results):,} ({total_tokens:,} token)",
         level=log_level.INFO,
     )
 
